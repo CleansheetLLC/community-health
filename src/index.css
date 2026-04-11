@@ -5,3 +5,12 @@
 body {
   margin: 0;
 }
+
+/* Leaflet SVI tooltip */
+.svi-tooltip {
+  font-family: Barlow, sans-serif;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 4px 8px;
+  border-radius: 4px;
+}

@@ -7,6 +7,7 @@ import {
   AHC_QUESTIONS, AHC_DOMAINS, AHC_Z_CODE_MAPPINGS,
   type AhcQuestion,
 } from "./ahc-hrsn";
+import SVIMapView from "./SVIMap";
 
 function t(en: string, es: string | undefined, lang: Lang): string {
   return lang === "es" && es ? es : en;
@@ -829,8 +830,8 @@ function ZCodeReference() {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type Tab = "about" | "prapare" | "ahc-hrsn" | "zcodes";
-const VALID_TABS: Tab[] = ["about", "prapare", "ahc-hrsn", "zcodes"];
+type Tab = "about" | "prapare" | "ahc-hrsn" | "zcodes" | "svi-map";
+const VALID_TABS: Tab[] = ["about", "prapare", "ahc-hrsn", "zcodes", "svi-map"];
 
 function parseHash(): Tab {
   const hash = window.location.hash.replace("#", "");
@@ -842,7 +843,7 @@ function ShareButton({ tab }: { tab: Tab }) {
 
   const share = useCallback(() => {
     const url = `${window.location.origin}${window.location.pathname}#${tab}`;
-    const titles: Record<Tab, string> = { about: "Community Health Tools", prapare: "PRAPARE Screening Tool", "ahc-hrsn": "AHC-HRSN Screening Tool", zcodes: "ICD-10 Z Code Reference" };
+    const titles: Record<Tab, string> = { about: "Community Health Tools", prapare: "PRAPARE Screening Tool", "ahc-hrsn": "AHC-HRSN Screening Tool", zcodes: "ICD-10 Z Code Reference", "svi-map": "CDC Social Vulnerability Index Map" };
     if (navigator.share) {
       navigator.share({ title: titles[tab], url }).catch(() => {});
     } else {
@@ -918,6 +919,7 @@ export default function App() {
                 { id: "about" as const, label: "About" },
                 { id: "prapare" as const, label: "PRAPARE" },
                 { id: "ahc-hrsn" as const, label: "AHC-HRSN" },
+                // { id: "svi-map" as const, label: "SVI Map" }, // hidden pending data pipeline
                 { id: "zcodes" as const, label: "Z Codes" },
               ].map((tab) => (
                 <button
@@ -1000,6 +1002,20 @@ export default function App() {
                     Z code mapping. Suitable for universal screening at intake.
                   </p>
                 </button>
+                {/* SVI Map card hidden pending data pipeline research
+                <button
+                  onClick={() => navigate("svi-map")}
+                  className="border border-cs-text/10 rounded-lg p-6 text-left hover:border-cs-blue/30 transition-colors"
+                >
+                  <h3 className="font-heading text-lg text-cs-text mb-1">
+                    CDC SVI Map
+                  </h3>
+                  <p className="font-body text-sm text-cs-text/60 leading-relaxed">
+                    Interactive Social Vulnerability Index map at census tract level.
+                    Four themes, facility overlay, upload your own data.
+                  </p>
+                </button>
+                */}
                 <button
                   onClick={() => navigate("zcodes")}
                   className="border border-cs-text/10 rounded-lg p-6 text-left hover:border-cs-blue/30 transition-colors"
@@ -1106,6 +1122,24 @@ export default function App() {
               </p>
             </div>
             <AhcHrsnScreening />
+          </div>
+        </section>
+      )}
+
+      {/* SVI Map tab */}
+      {activeTab === "svi-map" && (
+        <section className="bg-cs-bg px-6 py-12">
+          <div className="max-w-3xl mx-auto">
+            <div className="mb-8">
+              <h2 className="font-heading text-2xl text-cs-text mb-2">
+                CDC Social Vulnerability Index Map
+              </h2>
+              <p className="font-body text-sm text-cs-text/60">
+                Census tract-level social vulnerability data from CDC/ATSDR. Four themes:
+                socioeconomic status, household characteristics, minority status, and housing/transportation.
+              </p>
+            </div>
+            <SVIMapView />
           </div>
         </section>
       )}
