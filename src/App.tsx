@@ -8,6 +8,11 @@ import {
   type AhcQuestion,
 } from "./ahc-hrsn";
 import SVIMapView from "./SVIMap";
+import {
+  saveScreeningEntry, getScreeningLog, clearScreeningLog,
+  exportScreeningLogCSV, downloadCSV,
+  type ScreeningLogEntry,
+} from "./screening-log";
 
 function t(en: string, es: string | undefined, lang: Lang): string {
   return lang === "es" && es ? es : en;
@@ -147,6 +152,35 @@ function PrapareScreening() {
 
   const answeredCount = Object.keys(answers).length;
   const totalQuestions = QUESTIONS.length;
+  const [saved, setSaved] = useState(false);
+
+  const handleSaveResult = useCallback(() => {
+    const zCodes: string[] = [];
+    for (const d of DOMAINS) {
+      if ((riskFlags[d.id] || []).length > 0) {
+        const matched = Z_CODE_MAPPINGS
+          .filter((m) => m.domain.toLowerCase().includes(d.label.toLowerCase().split(" ")[0]))
+          .flatMap((m) => m.codes.map((c) => c.code));
+        zCodes.push(...matched);
+      }
+    }
+    const entry: ScreeningLogEntry = {
+      id: crypto.randomUUID(),
+      date: new Date().toISOString(),
+      instrument: "PRAPARE",
+      overallRisk: riskLevel,
+      domainsWithFlags,
+      totalFlags,
+      domains: DOMAINS.map((d) => ({
+        domain: d.label,
+        flagCount: (riskFlags[d.id] || []).length,
+        flags: riskFlags[d.id] || [],
+      })),
+      suggestedZCodes: [...new Set(zCodes)],
+    };
+    saveScreeningEntry(entry);
+    setSaved(true);
+  }, [riskFlags, riskLevel, domainsWithFlags, totalFlags]);
 
   return (
     <div>
@@ -328,18 +362,31 @@ function PrapareScreening() {
               {lang === "es" ? "Volver a las Preguntas" : "Back to Questions"}
             </button>
             <button
-              onClick={() => { setAnswers({}); setShowResults(false); setActiveDomain(DOMAINS[0].id); }}
+              onClick={() => { setAnswers({}); setShowResults(false); setActiveDomain(DOMAINS[0].id); setSaved(false); }}
               className="font-body text-sm font-medium text-cs-text-muted border border-cs-text/20 hover:border-cs-text/40 px-5 py-2.5 rounded-lg transition-colors"
             >
               {lang === "es" ? "Comenzar de Nuevo" : "Start Over"}
+            </button>
+            <button
+              onClick={handleSaveResult}
+              disabled={saved}
+              className={`font-body text-sm font-medium px-5 py-2.5 rounded-lg transition-colors ${
+                saved
+                  ? "bg-green-100 text-green-700 border border-green-200"
+                  : "text-white bg-cs-blue hover:bg-cs-blue-dark"
+              }`}
+            >
+              {saved
+                ? (lang === "es" ? "Guardado en el registro" : "Saved to Log")
+                : (lang === "es" ? "Guardar Resultado" : "Save to Screening Log")}
             </button>
           </div>
 
           <div className="rounded-lg bg-cs-bg p-4">
             <p className="font-body text-xs text-cs-text/50">
               <strong className="text-cs-text/70">Disclaimer:</strong> This tool implements the published
-              PRAPARE screening instrument (NACHC, 2019). It does not collect, transmit, or store any data.
-              All responses remain in your browser and are cleared when you close this page. Consult your
+              PRAPARE screening instrument (NACHC, 2019). Results saved to the screening log are stored in
+              your browser's local storage only. No data is transmitted. Consult your
               clinical team for interpretation and care planning. This is not a medical device.
             </p>
           </div>
@@ -507,6 +554,35 @@ function AhcHrsnScreening() {
 
   const answeredCount = Object.keys(answers).length;
   const totalQuestions = AHC_QUESTIONS.length;
+  const [saved, setSaved] = useState(false);
+
+  const handleSaveResult = useCallback(() => {
+    const zCodes: string[] = [];
+    for (const d of AHC_DOMAINS) {
+      if ((riskFlags[d.id] || []).length > 0) {
+        const matched = AHC_Z_CODE_MAPPINGS
+          .filter((m) => m.domain.toLowerCase().includes(d.label.toLowerCase().split(" ")[0]))
+          .flatMap((m) => m.codes.map((c) => c.code));
+        zCodes.push(...matched);
+      }
+    }
+    const entry: ScreeningLogEntry = {
+      id: crypto.randomUUID(),
+      date: new Date().toISOString(),
+      instrument: "AHC-HRSN",
+      overallRisk: overallRisk,
+      domainsWithFlags,
+      totalFlags,
+      domains: AHC_DOMAINS.map((d) => ({
+        domain: d.label,
+        flagCount: (riskFlags[d.id] || []).length,
+        flags: riskFlags[d.id] || [],
+      })),
+      suggestedZCodes: [...new Set(zCodes)],
+    };
+    saveScreeningEntry(entry);
+    setSaved(true);
+  }, [riskFlags, overallRisk, domainsWithFlags, totalFlags]);
 
   return (
     <div>
@@ -688,10 +764,23 @@ function AhcHrsnScreening() {
               {lang === "es" ? "Volver a las Preguntas" : "Back to Questions"}
             </button>
             <button
-              onClick={() => { setAnswers({}); setShowResults(false); setActiveDomain(AHC_DOMAINS[0].id); }}
+              onClick={() => { setAnswers({}); setShowResults(false); setActiveDomain(AHC_DOMAINS[0].id); setSaved(false); }}
               className="font-body text-sm font-medium text-cs-text-muted border border-cs-text/20 hover:border-cs-text/40 px-5 py-2.5 rounded-lg transition-colors"
             >
               {lang === "es" ? "Comenzar de Nuevo" : "Start Over"}
+            </button>
+            <button
+              onClick={handleSaveResult}
+              disabled={saved}
+              className={`font-body text-sm font-medium px-5 py-2.5 rounded-lg transition-colors ${
+                saved
+                  ? "bg-green-100 text-green-700 border border-green-200"
+                  : "text-white bg-cs-blue hover:bg-cs-blue-dark"
+              }`}
+            >
+              {saved
+                ? (lang === "es" ? "Guardado en el registro" : "Saved to Log")
+                : (lang === "es" ? "Guardar Resultado" : "Save to Screening Log")}
             </button>
           </div>
 
@@ -699,8 +788,8 @@ function AhcHrsnScreening() {
             <p className="font-body text-xs text-cs-text/50">
               <strong className="text-cs-text/70">{lang === "es" ? "Aviso:" : "Disclaimer:"}</strong>{" "}
               {lang === "es"
-                ? "Esta herramienta implementa el instrumento de evaluación AHC-HRSN desarrollado por CMS. No recopila, transmite ni almacena ningún dato. Todas las respuestas permanecen en su navegador y se eliminan cuando cierra esta página. Consulte a su equipo clínico para la interpretación y planificación del cuidado. Esto no es un dispositivo médico."
-                : "This tool implements the CMS-developed AHC-HRSN screening instrument. It does not collect, transmit, or store any data. All responses remain in your browser and are cleared when you close this page. Consult your clinical team for interpretation and care planning. This is not a medical device."}
+                ? "Esta herramienta implementa el instrumento de evaluación AHC-HRSN desarrollado por CMS. Los resultados guardados se almacenan solo en el almacenamiento local de su navegador. No se transmiten datos. Consulte a su equipo clínico para la interpretación y planificación del cuidado. Esto no es un dispositivo médico."
+                : "This tool implements the CMS-developed AHC-HRSN screening instrument. Results saved to the screening log are stored in your browser's local storage only. No data is transmitted. Consult your clinical team for interpretation and care planning. This is not a medical device."}
             </p>
           </div>
         </div>
@@ -838,10 +927,161 @@ function ZCodeReference() {
   );
 }
 
+// ─── Screening Log ───────────────────────────────────────────────────────────
+
+function ScreeningLogView() {
+  const [log, setLog] = useState<ScreeningLogEntry[]>(getScreeningLog);
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  // Refresh log when tab becomes visible (in case screenings were saved in another tab)
+  useEffect(() => {
+    setLog(getScreeningLog());
+  }, []);
+
+  const handleExport = useCallback(() => {
+    const csv = exportScreeningLogCSV();
+    if (!csv) return;
+    const timestamp = new Date().toISOString().slice(0, 10);
+    downloadCSV(csv, `screening-log-${timestamp}.csv`);
+  }, []);
+
+  const handleClear = useCallback(() => {
+    clearScreeningLog();
+    setLog([]);
+    setConfirmClear(false);
+  }, []);
+
+  return (
+    <div className="space-y-4">
+      {/* Actions */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <p className="font-body text-sm text-cs-text/60">
+          {log.length} screening{log.length !== 1 ? "s" : ""} saved
+        </p>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExport}
+            disabled={log.length === 0}
+            className="font-body text-sm font-medium text-white bg-cs-blue hover:bg-cs-blue-dark px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
+          >
+            Export CSV
+          </button>
+          {!confirmClear ? (
+            <button
+              onClick={() => setConfirmClear(true)}
+              disabled={log.length === 0}
+              className="font-body text-sm font-medium text-cs-text-muted border border-cs-text/20 hover:border-red-300 hover:text-red-600 px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
+            >
+              Clear All
+            </button>
+          ) : (
+            <button
+              onClick={handleClear}
+              className="font-body text-sm font-medium text-white bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg transition-colors"
+            >
+              Confirm Clear
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Table */}
+      {log.length > 0 ? (
+        <div className="overflow-x-auto border border-cs-border rounded-lg">
+          <table className="w-full text-sm">
+            <thead className="bg-cs-bg">
+              <tr>
+                <th className="text-left px-4 py-2 font-body font-medium text-cs-text">Date</th>
+                <th className="text-left px-4 py-2 font-body font-medium text-cs-text">Instrument</th>
+                <th className="text-left px-4 py-2 font-body font-medium text-cs-text">Risk</th>
+                <th className="text-left px-4 py-2 font-body font-medium text-cs-text">Domains</th>
+                <th className="text-left px-4 py-2 font-body font-medium text-cs-text">Flags</th>
+                <th className="text-left px-4 py-2 font-body font-medium text-cs-text">Z Codes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {log.slice().reverse().map((entry) => (
+                <tr key={entry.id} className="border-t border-cs-border hover:bg-cs-bg/50">
+                  <td className="px-4 py-2 font-body text-cs-text whitespace-nowrap">{new Date(entry.date).toLocaleDateString()}</td>
+                  <td className="px-4 py-2">
+                    <span className={`font-body text-xs font-medium px-2 py-0.5 rounded-full ${
+                      entry.instrument === "PRAPARE" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                    }`}>
+                      {entry.instrument}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2">
+                    <span className={`font-body text-xs font-medium ${
+                      entry.overallRisk === "Low" ? "text-green-600" :
+                      entry.overallRisk === "Moderate" || entry.overallRisk === "Medium" ? "text-amber-600" :
+                      "text-red-600"
+                    }`}>
+                      {entry.overallRisk}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 font-body text-cs-text/70">{entry.domainsWithFlags}/{entry.domains.length}</td>
+                  <td className="px-4 py-2 font-body text-cs-text/70">{entry.totalFlags}</td>
+                  <td className="px-4 py-2">
+                    <div className="flex flex-wrap gap-1">
+                      {entry.suggestedZCodes.slice(0, 3).map((z) => (
+                        <span key={z} className="font-mono text-[10px] bg-cs-badge text-cs-blue-dark px-1.5 py-0.5 rounded">{z}</span>
+                      ))}
+                      {entry.suggestedZCodes.length > 3 && (
+                        <span className="font-body text-[10px] text-cs-text/40">+{entry.suggestedZCodes.length - 3}</span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="border border-cs-border rounded-lg bg-white p-12 text-center">
+          <p className="font-body text-sm text-cs-text/40 mb-2">No screenings saved yet</p>
+          <p className="font-body text-xs text-cs-text/30">Complete a PRAPARE or AHC-HRSN screening and click "Save to Screening Log" on the results page.</p>
+        </div>
+      )}
+
+      {/* Summary stats */}
+      {log.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {(() => {
+            const prapare = log.filter((e) => e.instrument === "PRAPARE");
+            const ahc = log.filter((e) => e.instrument === "AHC-HRSN");
+            const highRisk = log.filter((e) => e.overallRisk === "High");
+            const avgFlags = log.reduce((s, e) => s + e.totalFlags, 0) / log.length;
+            return [
+              { label: "PRAPARE", value: String(prapare.length) },
+              { label: "AHC-HRSN", value: String(ahc.length) },
+              { label: "High Risk", value: String(highRisk.length) },
+              { label: "Avg Flags", value: avgFlags.toFixed(1) },
+            ];
+          })().map((s) => (
+            <div key={s.label} className="border border-cs-border rounded-lg bg-white p-3">
+              <p className="font-body text-[11px] text-cs-text/50">{s.label}</p>
+              <p className="font-heading text-lg text-cs-text">{s.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="rounded-lg bg-cs-bg p-4">
+        <p className="font-body text-xs text-cs-text/50">
+          <strong className="text-cs-text/70">Storage:</strong> All screening log data is stored in your browser's
+          local storage. Nothing is transmitted. Export as CSV to open in Excel, Google Sheets, or any spreadsheet
+          application. No patient-identifying information is stored -- only dates, risk levels, domain scores, and
+          suggested Z codes.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type Tab = "about" | "prapare" | "ahc-hrsn" | "zcodes" | "svi-map";
-const VALID_TABS: Tab[] = ["about", "prapare", "ahc-hrsn", "zcodes", "svi-map"];
+type Tab = "about" | "prapare" | "ahc-hrsn" | "zcodes" | "svi-map" | "log";
+const VALID_TABS: Tab[] = ["about", "prapare", "ahc-hrsn", "zcodes", "svi-map", "log"];
 
 function parseHash(): Tab {
   const hash = window.location.hash.replace("#", "");
@@ -853,7 +1093,7 @@ function ShareButton({ tab }: { tab: Tab }) {
 
   const share = useCallback(() => {
     const url = `${window.location.origin}${window.location.pathname}#${tab}`;
-    const titles: Record<Tab, string> = { about: "Community Health Tools", prapare: "PRAPARE Screening Tool", "ahc-hrsn": "AHC-HRSN Screening Tool", zcodes: "ICD-10 Z Code Reference", "svi-map": "CDC Social Vulnerability Index Map" };
+    const titles: Record<Tab, string> = { about: "Community Health Tools", prapare: "PRAPARE Screening Tool", "ahc-hrsn": "AHC-HRSN Screening Tool", zcodes: "ICD-10 Z Code Reference", "svi-map": "CDC Social Vulnerability Index Map", log: "Screening Log" };
     if (navigator.share) {
       navigator.share({ title: titles[tab], url }).catch(() => {});
     } else {
@@ -931,6 +1171,7 @@ export default function App() {
                 { id: "ahc-hrsn" as const, label: "AHC-HRSN" },
                 // { id: "svi-map" as const, label: "SVI Map" }, // hidden pending data pipeline
                 { id: "zcodes" as const, label: "Z Codes" },
+                { id: "log" as const, label: "Log" },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -1150,6 +1391,24 @@ export default function App() {
               </p>
             </div>
             <SVIMapView />
+          </div>
+        </section>
+      )}
+
+      {/* Screening Log tab */}
+      {activeTab === "log" && (
+        <section className="bg-cs-bg px-6 py-12">
+          <div className="max-w-3xl mx-auto">
+            <div className="mb-8">
+              <h2 className="font-heading text-2xl text-cs-text mb-2">
+                Screening Log
+              </h2>
+              <p className="font-body text-sm text-cs-text/60">
+                Accumulated screening results from PRAPARE and AHC-HRSN. Export as CSV
+                for population health reporting, grant applications, and community needs assessments.
+              </p>
+            </div>
+            <ScreeningLogView />
           </div>
         </section>
       )}
