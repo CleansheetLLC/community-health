@@ -1304,15 +1304,21 @@ export default function App() {
               </h2>
               <div className="space-y-4 font-body font-light text-lg text-cs-text leading-relaxed">
                 <p>
-                  These tools run entirely in your browser. No data is collected,
-                  transmitted, or stored by Cleansheet. When you close the page,
-                  your screening responses are gone. There are no cookies, no
+                  These tools run entirely in your browser. No data is transmitted
+                  to Cleansheet or any third party. There are no cookies, no
                   analytics on screening content, and no accounts.
                 </p>
                 <p>
-                  If your organization needs to save screening results, integrate
-                  with your EHR, or track population-level SDOH data, those capabilities
-                  are available through the{" "}
+                  When you save a screening result to the log, it is stored in your
+                  browser's local storage on your device only. No patient-identifying
+                  information is saved -- only dates, risk levels, domain scores, and
+                  suggested Z codes. You can export the log as CSV and clear it at
+                  any time. Unsaved screening responses are discarded when you close
+                  the page.
+                </p>
+                <p>
+                  If your organization needs EHR integration or population-level
+                  SDOH dashboards, those capabilities are available through the{" "}
                   <a href="#about" className="text-cs-blue hover:underline">Cleansheet clinical platform</a>.
                 </p>
               </div>
