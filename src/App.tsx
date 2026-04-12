@@ -97,9 +97,14 @@ function PrapareScreening() {
   const toggleCheckbox = useCallback((qId: string, value: string) => {
     setAnswers((prev) => {
       const current = (prev[qId] as string[]) || [];
-      const next = current.includes(value)
-        ? current.filter((v) => v !== value)
-        : [...current, value];
+      // "decline" is mutually exclusive with all other options
+      if (value === "decline") {
+        return { ...prev, [qId]: current.includes("decline") ? [] : ["decline"] };
+      }
+      const withoutDecline = current.filter((v) => v !== "decline");
+      const next = withoutDecline.includes(value)
+        ? withoutDecline.filter((v) => v !== value)
+        : [...withoutDecline, value];
       return { ...prev, [qId]: next };
     });
   }, []);
@@ -444,9 +449,14 @@ function AhcHrsnScreening() {
   const toggleCheckbox = useCallback((qId: string, value: string) => {
     setAnswers((prev) => {
       const current = (prev[qId] as string[]) || [];
-      const next = current.includes(value)
-        ? current.filter((v) => v !== value)
-        : [...current, value];
+      // "none" is mutually exclusive with all other options
+      if (value === "none") {
+        return { ...prev, [qId]: current.includes("none") ? [] : ["none"] };
+      }
+      const withoutNone = current.filter((v) => v !== "none");
+      const next = withoutNone.includes(value)
+        ? withoutNone.filter((v) => v !== value)
+        : [...withoutNone, value];
       return { ...prev, [qId]: next };
     });
   }, []);
