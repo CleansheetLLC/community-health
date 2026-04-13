@@ -555,18 +555,29 @@ function PrapareScreening() {
           })}
 
           <div className="border-t border-cs-border pt-6 flex gap-4">
-            <button
-              onClick={() => setShowResults(false)}
-              className="font-body text-sm font-medium text-cs-blue border border-cs-blue/30 hover:border-cs-blue px-5 py-2.5 rounded-lg transition-colors"
-            >
-              {lang === "es" ? "Volver a las Preguntas" : "Back to Questions"}
-            </button>
-            <button
-              onClick={() => { setAnswers({}); setShowResults(false); setActiveDomain(DOMAINS[0].id); setSaved(false); setTagTract(false); setTractError(null); }}
-              className="font-body text-sm font-medium text-cs-text-muted border border-cs-text/20 hover:border-cs-text/40 px-5 py-2.5 rounded-lg transition-colors"
-            >
-              {lang === "es" ? "Comenzar de Nuevo" : "Start Over"}
-            </button>
+            {!saved ? (
+              <>
+                <button
+                  onClick={() => setShowResults(false)}
+                  className="font-body text-sm font-medium text-cs-blue border border-cs-blue/30 hover:border-cs-blue px-5 py-2.5 rounded-lg transition-colors"
+                >
+                  {lang === "es" ? "Volver a las Preguntas" : "Back to Questions"}
+                </button>
+                <button
+                  onClick={() => { setAnswers({}); setShowResults(false); setActiveDomain(DOMAINS[0].id); setSaved(false); setTagTract(false); setTractError(null); }}
+                  className="font-body text-sm font-medium text-cs-text-muted border border-cs-text/20 hover:border-cs-text/40 px-5 py-2.5 rounded-lg transition-colors"
+                >
+                  {lang === "es" ? "Comenzar de Nuevo" : "Start Over"}
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => { setAnswers({}); setShowResults(false); setActiveDomain(DOMAINS[0].id); setSaved(false); setTagTract(false); setTractError(null); }}
+                className="font-body text-sm font-medium text-cs-blue border border-cs-blue/30 hover:border-cs-blue px-5 py-2.5 rounded-lg transition-colors"
+              >
+                {lang === "es" ? "Nueva Evaluación" : "New Screening"}
+              </button>
+            )}
             <button
               onClick={handleSaveResult}
               disabled={saved || savingTract}
@@ -1093,18 +1104,29 @@ function AhcHrsnScreening() {
           })}
 
           <div className="border-t border-cs-border pt-6 flex gap-4">
-            <button
-              onClick={() => setShowResults(false)}
-              className="font-body text-sm font-medium text-cs-blue border border-cs-blue/30 hover:border-cs-blue px-5 py-2.5 rounded-lg transition-colors"
-            >
-              {lang === "es" ? "Volver a las Preguntas" : "Back to Questions"}
-            </button>
-            <button
-              onClick={() => { setAnswers({}); setShowResults(false); setActiveDomain(AHC_DOMAINS[0].id); setSaved(false); setTagTract(false); setTractError(null); }}
-              className="font-body text-sm font-medium text-cs-text-muted border border-cs-text/20 hover:border-cs-text/40 px-5 py-2.5 rounded-lg transition-colors"
-            >
-              {lang === "es" ? "Comenzar de Nuevo" : "Start Over"}
-            </button>
+            {!saved ? (
+              <>
+                <button
+                  onClick={() => setShowResults(false)}
+                  className="font-body text-sm font-medium text-cs-blue border border-cs-blue/30 hover:border-cs-blue px-5 py-2.5 rounded-lg transition-colors"
+                >
+                  {lang === "es" ? "Volver a las Preguntas" : "Back to Questions"}
+                </button>
+                <button
+                  onClick={() => { setAnswers({}); setShowResults(false); setActiveDomain(AHC_DOMAINS[0].id); setSaved(false); setTagTract(false); setTractError(null); }}
+                  className="font-body text-sm font-medium text-cs-text-muted border border-cs-text/20 hover:border-cs-text/40 px-5 py-2.5 rounded-lg transition-colors"
+                >
+                  {lang === "es" ? "Comenzar de Nuevo" : "Start Over"}
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => { setAnswers({}); setShowResults(false); setActiveDomain(AHC_DOMAINS[0].id); setSaved(false); setTagTract(false); setTractError(null); }}
+                className="font-body text-sm font-medium text-cs-blue border border-cs-blue/30 hover:border-cs-blue px-5 py-2.5 rounded-lg transition-colors"
+              >
+                {lang === "es" ? "Nueva Evaluación" : "New Screening"}
+              </button>
+            )}
             <button
               onClick={handleSaveResult}
               disabled={saved || savingTract}
