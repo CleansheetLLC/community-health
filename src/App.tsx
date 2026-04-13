@@ -4,7 +4,7 @@ import {
   type PrapareQuestion, type Lang,
 } from "./prapare";
 import {
-  AHC_QUESTIONS, AHC_DOMAINS, AHC_Z_CODE_MAPPINGS,
+  AHC_QUESTIONS, AHC_DOMAINS, AHC_Z_CODE_MAPPINGS, getZCodesForAhcAnswer,
   type AhcQuestion,
 } from "./ahc-hrsn";
 import SVIMapView from "./SVIMap";
@@ -717,14 +717,11 @@ function AhcHrsnScreening() {
   const [tractError, setTractError] = useState<string | null>(null);
 
   const handleSaveResult = useCallback(async () => {
-    const zCodes: string[] = [];
-    for (const d of AHC_DOMAINS) {
-      if ((riskFlags[d.id] || []).length > 0) {
-        const matched = AHC_Z_CODE_MAPPINGS
-          .filter((m) => m.domain.toLowerCase().includes(d.label.toLowerCase().split(" ")[0]))
-          .flatMap((m) => m.codes.map((c) => c.code));
-        zCodes.push(...matched);
-      }
+    // Answer-specific Z code collection (more precise than domain-level mapping)
+    const zCodeSet = new Set<string>();
+    for (const q of AHC_QUESTIONS) {
+      const codes = getZCodesForAhcAnswer(q.id, answers[q.id] as string | string[] | undefined);
+      codes.forEach((c) => zCodeSet.add(c.code));
     }
     const entry: ScreeningLogEntry = {
       id: crypto.randomUUID(),
@@ -738,7 +735,7 @@ function AhcHrsnScreening() {
         flagCount: (riskFlags[d.id] || []).length,
         flags: riskFlags[d.id] || [],
       })),
-      suggestedZCodes: [...new Set(zCodes)],
+      suggestedZCodes: [...zCodeSet],
     };
 
     if (tagTract) {
@@ -770,7 +767,7 @@ function AhcHrsnScreening() {
 
     saveScreeningEntry(entry);
     setSaved(true);
-  }, [riskFlags, overallRisk, domainsWithFlags, totalFlags, tagTract, lang]);
+  }, [answers, riskFlags, overallRisk, domainsWithFlags, totalFlags, tagTract, lang]);
 
   return (
     <div>
@@ -924,22 +921,29 @@ function AhcHrsnScreening() {
                     ))}
                   </ul>
                 )}
-                {flags.length > 0 && (
-                  <div className="border-t border-cs-border pt-3 mt-3">
-                    <p className="font-body text-xs text-cs-text/50 mb-1">{lang === "es" ? "Códigos Z del ICD-10 sugeridos:" : "Suggested ICD-10 Z codes:"}</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {AHC_Z_CODE_MAPPINGS
-                        .filter((m) => m.domain.toLowerCase().includes(d.label.toLowerCase().split(" ")[0]))
-                        .flatMap((m) => m.codes)
-                        .filter((c, i, arr) => arr.findIndex((x) => x.code === c.code) === i)
-                        .map((c) => (
+                {flags.length > 0 && (() => {
+                  // Answer-specific Z codes for this domain's questions
+                  const domainQs = AHC_QUESTIONS.filter((q) => q.domain === d.id);
+                  const allCodes = domainQs.flatMap((q) =>
+                    getZCodesForAhcAnswer(q.id, answers[q.id] as string | string[] | undefined)
+                  );
+                  const uniqueCodes = allCodes.filter(
+                    (c, i, arr) => arr.findIndex((x) => x.code === c.code) === i
+                  );
+                  if (uniqueCodes.length === 0) return null;
+                  return (
+                    <div className="border-t border-cs-border pt-3 mt-3">
+                      <p className="font-body text-xs text-cs-text/50 mb-1">{lang === "es" ? "Códigos Z del ICD-10 sugeridos:" : "Suggested ICD-10 Z codes:"}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {uniqueCodes.map((c) => (
                           <span key={c.code} className="font-mono text-xs bg-cs-badge text-cs-blue-dark px-2 py-0.5 rounded">
                             {c.code} {c.description}
                           </span>
                         ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             );
           })}

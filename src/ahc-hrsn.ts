@@ -282,3 +282,136 @@ export const AHC_Z_CODE_MAPPINGS: AhcZCodeMapping[] = [
     ],
   },
 ];
+
+// ─── Answer-specific Z code mapping ──────────────────────────────────────────
+// More precise than AHC_Z_CODE_MAPPINGS (above), which lumps all codes per domain.
+// Keyed by (questionId, answerValue) so each specific response maps to the
+// most clinically accurate Z code(s). Used by the results display and save handler.
+
+export interface AhcAnswerZCode {
+  code: string;
+  description: string;
+}
+
+export const AHC_ANSWER_Z_CODES: Record<string, Record<string, AhcAnswerZCode[]>> = {
+  // ── ahc1: Living situation ──
+  ahc1: {
+    worried: [
+      { code: "Z59.811", description: "Housing instability, housed, with risk of homelessness" },
+    ],
+    unsteady: [
+      { code: "Z59.00", description: "Homelessness, unspecified" },
+      { code: "Z59.02", description: "Unsheltered homelessness" },
+    ],
+  },
+  // ── ahc2: Home quality problems (checkbox) ──
+  ahc2: {
+    pests: [{ code: "Z59.19", description: "Other inadequate housing" }],
+    mold: [{ code: "Z59.19", description: "Other inadequate housing" }],
+    lead: [
+      { code: "Z77.011", description: "Contact with and (suspected) exposure to lead" },
+      { code: "Z59.19", description: "Other inadequate housing" },
+    ],
+    heat: [
+      { code: "Z59.11", description: "Inadequate housing environmental temperature" },
+    ],
+    oven: [{ code: "Z59.19", description: "Other inadequate housing" }],
+    smoke: [{ code: "Z59.19", description: "Other inadequate housing" }],
+    leaks: [{ code: "Z59.19", description: "Other inadequate housing" }],
+  },
+  // ── ahc3, ahc4: Food insecurity (USDA 2-item) ──
+  // "Often true" is the more severe indicator; "Sometimes true" also screens positive
+  // but maps to the "other specified" code rather than Z59.41.
+  ahc3: {
+    often: [{ code: "Z59.41", description: "Food insecurity" }],
+    sometimes: [
+      { code: "Z59.48", description: "Other specified lack of adequate food" },
+    ],
+  },
+  ahc4: {
+    often: [{ code: "Z59.41", description: "Food insecurity" }],
+    sometimes: [
+      { code: "Z59.48", description: "Other specified lack of adequate food" },
+    ],
+  },
+  // ── ahc5: Transportation ──
+  ahc5: {
+    "yes-medical": [{ code: "Z59.82", description: "Transportation insecurity" }],
+    "yes-nonmedical": [{ code: "Z59.82", description: "Transportation insecurity" }],
+  },
+  // ── ahc6: Utilities ──
+  // "Threatened" vs "Already shut off" are materially different clinical situations.
+  ahc6: {
+    yes: [
+      { code: "Z59.19", description: "Other inadequate housing" },
+    ],
+    shutoff: [
+      { code: "Z59.19", description: "Other inadequate housing" },
+      { code: "Z58.81", description: "Basic services unavailable in physical environment" },
+    ],
+  },
+  // ── ahc7-ahc10: Interpersonal safety (HITS subscale) ──
+  // Any positive response warrants clinical attention. At higher frequencies ("Fairly often",
+  // "Frequently") we add a second code to reflect the more sustained pattern.
+  // ahc7: physical hurt
+  ahc7: {
+    rarely: [{ code: "Z65.4", description: "Victim of crime and terrorism" }],
+    sometimes: [{ code: "Z65.4", description: "Victim of crime and terrorism" }],
+    "fairly-often": [
+      { code: "Z65.4", description: "Victim of crime and terrorism" },
+      { code: "Z63.0", description: "Problems in relationship with spouse or partner" },
+    ],
+    frequently: [
+      { code: "Z65.4", description: "Victim of crime and terrorism" },
+      { code: "Z63.0", description: "Problems in relationship with spouse or partner" },
+    ],
+  },
+  // ahc8: insult/talk down (emotional abuse indicator)
+  ahc8: {
+    rarely: [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
+    sometimes: [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
+    "fairly-often": [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
+    frequently: [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
+  },
+  // ahc9: threaten with harm
+  ahc9: {
+    rarely: [{ code: "Z65.4", description: "Victim of crime and terrorism" }],
+    sometimes: [{ code: "Z65.4", description: "Victim of crime and terrorism" }],
+    "fairly-often": [
+      { code: "Z65.4", description: "Victim of crime and terrorism" },
+      { code: "Z63.0", description: "Problems in relationship with spouse or partner" },
+    ],
+    frequently: [
+      { code: "Z65.4", description: "Victim of crime and terrorism" },
+      { code: "Z63.0", description: "Problems in relationship with spouse or partner" },
+    ],
+  },
+  // ahc10: scream/curse (verbal abuse indicator)
+  ahc10: {
+    rarely: [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
+    sometimes: [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
+    "fairly-often": [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
+    frequently: [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
+  },
+};
+
+// Get Z codes for a specific question+answer. For checkbox questions, pass the
+// answer array; for radio, pass the single value. Returns empty array if no
+// positive screen or no mapping defined.
+export function getZCodesForAhcAnswer(
+  qId: string,
+  answer: string | string[] | undefined
+): AhcAnswerZCode[] {
+  if (!answer) return [];
+  const q = AHC_QUESTIONS.find((x) => x.id === qId);
+  if (!q) return [];
+  const values = Array.isArray(answer) ? answer : [answer];
+  const codes: AhcAnswerZCode[] = [];
+  for (const v of values) {
+    const opt = q.options.find((o) => o.value === v);
+    if (!opt?.isPositiveScreen) continue;
+    const mapped = AHC_ANSWER_Z_CODES[qId]?.[v] || [];
+    codes.push(...mapped);
+  }
+  return codes;
+}
