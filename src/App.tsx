@@ -1513,21 +1513,76 @@ export default function App() {
                     screening-to-Z-code mapping tables.
                   </p>
                 </button>
+              </div>
+            </div>
+          </section>
+
+          {/* Beyond the self-service tools */}
+          <section className="bg-cs-dark text-white px-6 py-20">
+            <div className="max-w-3xl mx-auto">
+              <h2 className="font-heading text-2xl mb-3">
+                Beyond the Self-Service Tools
+              </h2>
+              <p className="font-body font-light text-sm text-white/70 leading-relaxed mb-8">
+                These tools are designed to be self-deploy and self-operate. If that's not
+                what you need, here are the options.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Self-host */}
                 <a
                   href="https://github.com/CleansheetLLC/community-health"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="border border-cs-text/10 rounded-lg p-6 text-left hover:border-cs-blue/30 transition-colors"
+                  className="rounded-lg border border-white/15 bg-white/5 p-5 hover:border-white/40 hover:bg-white/10 transition-colors"
                 >
-                  <h3 className="font-heading text-lg text-cs-text mb-1">
-                    Self-Host / Fork
-                  </h3>
-                  <p className="font-body text-sm text-cs-text/60 leading-relaxed">
-                    Apache 2.0 on GitHub. Clone, build, deploy on your own
-                    infrastructure. No dependencies on Cleansheet services.
+                  <div className="font-body text-[10px] uppercase tracking-wider text-white/50 mb-2">Free · Apache 2.0</div>
+                  <h3 className="font-heading text-base mb-2">Self-host or fork</h3>
+                  <p className="font-body font-light text-xs text-white/70 leading-relaxed mb-4">
+                    Clone the repo, deploy on Cloudflare Pages, Azure Static Web Apps, or any
+                    static host. Deploy guide in the README. Bug reports and questions welcome
+                    as GitHub issues.
                   </p>
+                  <span className="font-body text-xs font-medium text-cs-blue">View on GitHub →</span>
+                </a>
+
+                {/* Custom instruments */}
+                <a
+                  href="mailto:hello@cleansheet.dev?subject=Custom%20screening%20instrument"
+                  className="rounded-lg border border-white/15 bg-white/5 p-5 hover:border-white/40 hover:bg-white/10 transition-colors"
+                >
+                  <div className="font-body text-[10px] uppercase tracking-wider text-white/50 mb-2">Scoped engagement</div>
+                  <h3 className="font-heading text-base mb-2">Additional screening instruments</h3>
+                  <p className="font-body font-light text-xs text-white/70 leading-relaxed mb-4">
+                    PHQ-9, GAD-7, ACEs, or a facility-specific instrument built on the same
+                    foundation (bilingual, TTS, Z code mapping, CSV export). Fixed scope and
+                    fixed cost. We build it, you host it.
+                  </p>
+                  <span className="font-body text-xs font-medium text-cs-blue">Email us to scope →</span>
+                </a>
+
+                {/* Platform integration */}
+                <a
+                  href="#about"
+                  className="rounded-lg border border-white/15 bg-white/5 p-5 hover:border-white/40 hover:bg-white/10 transition-colors"
+                >
+                  <div className="font-body text-[10px] uppercase tracking-wider text-white/50 mb-2">Clinical platform</div>
+                  <h3 className="font-heading text-base mb-2">EHR integration &amp; population analytics</h3>
+                  <p className="font-body font-light text-xs text-white/70 leading-relaxed mb-4">
+                    Aggregate SDOH dashboards across facilities, FHIR DocumentReference
+                    write-back to your EHR, attestation-gated clinician review, and CIP-level
+                    population health reporting. This is the Cleansheet clinical platform.
+                  </p>
+                  <span className="font-body text-xs font-medium text-cs-blue">Learn more →</span>
                 </a>
               </div>
+
+              <p className="font-body text-xs text-white/40 mt-6 leading-relaxed">
+                We're a small team building tools, not a managed service provider. For hands-on
+                deployment, day-to-day operations, or round-the-clock support of a self-hosted
+                instance, you'll want a local IT partner alongside us. Happy to suggest one if
+                it helps.
+              </p>
             </div>
           </section>
 
