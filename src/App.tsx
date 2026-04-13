@@ -541,9 +541,10 @@ function PrapareScreening() {
               <strong className="text-cs-text/70">Disclaimer:</strong> This tool implements the published
               PRAPARE screening instrument (NACHC, 2019). Results saved to the screening log are stored in
               your browser's local storage only. No data is transmitted to Cleansheet. If you opt in to
-              census tract tagging, your browser's location is sent to the US Census Bureau's public
-              geocoder to determine the tract FIPS code; the lat/lon is not retained. Consult your
-              clinical team for interpretation and care planning. This is not a medical device.
+              census tract tagging, your browser's location is sent to a public US government geocoder
+              (FCC primary, US Census Bureau fallback) to determine the tract FIPS code; the lat/lon is
+              not retained. Consult your clinical team for interpretation and care planning. This is not
+              a medical device.
             </p>
           </div>
         </div>
@@ -1011,8 +1012,8 @@ function AhcHrsnScreening() {
             <p className="font-body text-xs text-cs-text/50">
               <strong className="text-cs-text/70">{lang === "es" ? "Aviso:" : "Disclaimer:"}</strong>{" "}
               {lang === "es"
-                ? "Esta herramienta implementa el instrumento de evaluación AHC-HRSN desarrollado por CMS. Los resultados guardados se almacenan solo en el almacenamiento local de su navegador. No se transmiten datos a Cleansheet. Si opta por etiquetar el tracto censal, la ubicación de su navegador se envía al geocodificador público del Census Bureau para determinar el código FIPS del tracto; no se conserva la latitud/longitud. Consulte a su equipo clínico para la interpretación y planificación del cuidado. Esto no es un dispositivo médico."
-                : "This tool implements the CMS-developed AHC-HRSN screening instrument. Results saved to the screening log are stored in your browser's local storage only. No data is transmitted to Cleansheet. If you opt in to census tract tagging, your browser's location is sent to the US Census Bureau's public geocoder to determine the tract FIPS code; the lat/lon is not retained. Consult your clinical team for interpretation and care planning. This is not a medical device."}
+                ? "Esta herramienta implementa el instrumento de evaluación AHC-HRSN desarrollado por CMS. Los resultados guardados se almacenan solo en el almacenamiento local de su navegador. No se transmiten datos a Cleansheet. Si opta por etiquetar el tracto censal, la ubicación de su navegador se envía a un geocodificador público del gobierno de EE. UU. (FCC primario, US Census Bureau como respaldo) para determinar el código FIPS del tracto; no se conserva la latitud/longitud. Consulte a su equipo clínico para la interpretación y planificación del cuidado. Esto no es un dispositivo médico."
+                : "This tool implements the CMS-developed AHC-HRSN screening instrument. Results saved to the screening log are stored in your browser's local storage only. No data is transmitted to Cleansheet. If you opt in to census tract tagging, your browser's location is sent to a public US government geocoder (FCC primary, US Census Bureau fallback) to determine the tract FIPS code; the lat/lon is not retained. Consult your clinical team for interpretation and care planning. This is not a medical device."}
             </p>
           </div>
         </div>
@@ -1548,10 +1549,13 @@ export default function App() {
                 <p>
                   <strong>Optional census tract tagging:</strong> When saving a
                   screening you can opt in to tag the result with a US Census tract
-                  FIPS code. If you do, your browser's location is sent once to the
-                  US Census Bureau's public geocoder to look up the tract; the
+                  FIPS code. If you do, your browser's location is sent once to a
+                  public US government geocoder (FCC Block API as primary, US
+                  Census Bureau geocoder as fallback) to look up the tract; the
                   lat/lon coordinates are discarded and only the tract FIPS (HIPAA
                   Safe Harbor de-identifiable, ~4,000 people per tract) is stored.
+                  Successful lookups are cached in your browser for 30 days so
+                  repeated screenings at the same location don't re-query the API.
                   This enables cross-referencing with CDC SVI scores and aggregate
                   geographic reporting for community needs assessments.
                 </p>
