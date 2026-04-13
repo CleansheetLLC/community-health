@@ -113,15 +113,25 @@ function TractLocationTest({ lang }: { lang: Lang }) {
 
 const LANG_VOICE_MAP: Record<Lang, string> = { en: "en-US", es: "es-MX" };
 
+export interface SpeakSegment {
+  id: string;      // conceptual id for this segment (e.g. "q1" or "q1:unhoused")
+  start: number;   // char offset where segment begins in the utterance
+  end: number;     // char offset where segment ends (exclusive)
+}
+
 function useTTS() {
   const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [charIndex, setCharIndex] = useState(-1);
+  const [segments, setSegments] = useState<SpeakSegment[]>([]);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
 
-  const speak = useCallback((id: string, text: string, lang: Lang) => {
+  const speak = useCallback((id: string, text: string, lang: Lang, segs: SpeakSegment[] = []) => {
     // If already speaking this item, stop
     if (speakingId === id) {
       window.speechSynthesis.cancel();
       setSpeakingId(null);
+      setCharIndex(-1);
+      setSegments([]);
       return;
     }
     // Cancel anything in progress
@@ -130,34 +140,106 @@ function useTTS() {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = LANG_VOICE_MAP[lang];
     utterance.rate = 0.9;
-    utterance.onend = () => setSpeakingId(null);
-    utterance.onerror = () => setSpeakingId(null);
+    utterance.onstart = () => setCharIndex(0);
+    utterance.onboundary = (e) => {
+      if (e.name === "word") setCharIndex(e.charIndex);
+    };
+    utterance.onend = () => {
+      setSpeakingId(null);
+      setCharIndex(-1);
+      setSegments([]);
+    };
+    utterance.onerror = () => {
+      setSpeakingId(null);
+      setCharIndex(-1);
+      setSegments([]);
+    };
     utteranceRef.current = utterance;
     setSpeakingId(id);
+    setCharIndex(0);
+    setSegments(segs);
     window.speechSynthesis.speak(utterance);
   }, [speakingId]);
 
   const stop = useCallback(() => {
     window.speechSynthesis.cancel();
     setSpeakingId(null);
+    setCharIndex(-1);
+    setSegments([]);
   }, []);
 
-  return { speak, stop, speakingId };
+  return { speak, stop, speakingId, charIndex, segments };
 }
 
-function SpeakerButton({ isActive, onClick }: { isActive: boolean; onClick: () => void }) {
+type TTS = ReturnType<typeof useTTS>;
+
+// For a given target id, compute whether its text is currently being highlighted
+// and the local character index within that text.
+function getHighlightPosition(targetId: string, tts: TTS): number {
+  if (tts.charIndex < 0) return -1;
+  // Direct speak: speakingId matches target
+  if (tts.speakingId === targetId) return tts.charIndex;
+  // Segment speak ("Read all"): find segment and compute local offset
+  const seg = tts.segments.find((s) => s.id === targetId);
+  if (seg && tts.charIndex >= seg.start && tts.charIndex < seg.end) {
+    return tts.charIndex - seg.start;
+  }
+  return -1;
+}
+
+// Render text with karaoke-style word highlighting.
+// `localCharIndex` is the position within `text` being spoken (-1 = not active).
+function HighlightedText({ text, localCharIndex, className = "" }: {
+  text: string;
+  localCharIndex: number;
+  className?: string;
+}) {
+  if (localCharIndex < 0) {
+    return <span className={className}>{text}</span>;
+  }
+  // Split text into alternating word and whitespace tokens, preserving original spacing
+  const tokens: { text: string; start: number; end: number; isWord: boolean }[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const start = i;
+    const isWord = !/\s/.test(text[i]);
+    while (i < text.length && !/\s/.test(text[i]) === isWord) i++;
+    tokens.push({ text: text.slice(start, i), start, end: i, isWord });
+  }
+
+  return (
+    <span className={className}>
+      {tokens.map((tok, idx) => {
+        if (!tok.isWord) return <span key={idx}>{tok.text}</span>;
+        const active = localCharIndex >= tok.start && localCharIndex < tok.end;
+        return (
+          <span
+            key={idx}
+            className={active ? "bg-cs-blue/25 text-cs-text rounded-sm px-0.5 -mx-0.5 transition-colors" : ""}
+          >
+            {tok.text}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function SpeakerButton({ isActive, onClick, size = "md" }: { isActive: boolean; onClick: (e: React.MouseEvent) => void; size?: "sm" | "md" }) {
+  const pad = size === "sm" ? "p-1" : "p-1.5";
+  const dim = size === "sm" ? 13 : 16;
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={isActive ? "Stop reading" : "Read aloud"}
-      className={`shrink-0 p-1.5 rounded-md transition-colors ${
+      className={`shrink-0 ${pad} rounded-md transition-colors ${
         isActive
           ? "text-cs-blue bg-cs-blue/10"
           : "text-cs-text/30 hover:text-cs-blue hover:bg-cs-blue/5"
       }`}
     >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <svg width={dim} height={dim} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         {isActive ? (
           <>
             <rect x="6" y="4" width="4" height="16" rx="1" />
@@ -562,11 +644,49 @@ function QuestionCard({ question, answer, onAnswer, onToggle, lang = "en", tts }
   tts: ReturnType<typeof useTTS>;
 }) {
   const questionText = t(question.text, question.textEs, lang);
+  const hasOptions = (question.type === "radio" || question.type === "checkbox") && question.options && question.options.length > 0;
+  const readAllId = `${question.id}:all`;
+
+  // Build "read all" text and compute char-offset segments for highlighting sync
+  let readAllText = questionText;
+  const readAllSegments: SpeakSegment[] = [];
+  if (hasOptions) {
+    readAllSegments.push({ id: question.id, start: 0, end: questionText.length });
+    let cursor = questionText.length;
+    const parts: string[] = [questionText];
+    for (const opt of question.options!) {
+      const optText = t(opt.label, opt.labelEs, lang);
+      const sep = ". ";
+      const segStart = cursor + sep.length;
+      parts.push(optText);
+      readAllSegments.push({ id: `${question.id}:${opt.value}`, start: segStart, end: segStart + optText.length });
+      cursor = segStart + optText.length;
+    }
+    readAllText = parts.join(". ");
+  }
 
   return (
     <div className="border border-cs-border rounded-lg p-5 bg-white">
       <div className="flex items-start gap-2 mb-3">
-        <p className="font-body text-sm text-cs-text flex-1">{questionText}</p>
+        <p className="font-body text-sm text-cs-text flex-1">
+          <HighlightedText text={questionText} localCharIndex={getHighlightPosition(question.id, tts)} />
+        </p>
+        {hasOptions && (
+          <button
+            type="button"
+            onClick={() => tts.speak(readAllId, readAllText, lang, readAllSegments)}
+            className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-body font-medium transition-colors ${
+              tts.speakingId === readAllId
+                ? "text-cs-blue bg-cs-blue/10"
+                : "text-cs-text/40 hover:text-cs-blue hover:bg-cs-blue/5"
+            }`}
+            aria-label={lang === "es" ? "Leer pregunta y opciones" : "Read question and options"}
+          >
+            {tts.speakingId === readAllId
+              ? (lang === "es" ? "Detener" : "Stop")
+              : (lang === "es" ? "Leer todo" : "Read all")}
+          </button>
+        )}
         <SpeakerButton
           isActive={tts.speakingId === question.id}
           onClick={() => tts.speak(question.id, questionText, lang)}
@@ -575,25 +695,38 @@ function QuestionCard({ question, answer, onAnswer, onToggle, lang = "en", tts }
 
       {question.type === "radio" && question.options && (
         <div className="space-y-2">
-          {question.options.map((opt) => (
-            <label key={opt.value} className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors ${
-              answer === opt.value
-                ? opt.isPositiveScreen ? "bg-red-50 border border-red-200" : "bg-cs-badge border border-cs-blue/20"
-                : "hover:bg-cs-bg border border-transparent"
-            }`}>
-              <input
-                type="radio"
-                name={question.id}
-                value={opt.value}
-                checked={answer === opt.value}
-                onChange={() => onAnswer(question.id, opt.value)}
-                className="accent-cs-blue"
-              />
-              <span className={`font-body text-sm ${opt.isDecline ? "text-cs-text/40 italic" : "text-cs-text"}`}>
-                {t(opt.label, opt.labelEs, lang)}
-              </span>
-            </label>
-          ))}
+          {question.options.map((opt) => {
+            const optText = t(opt.label, opt.labelEs, lang);
+            const optId = `${question.id}:${opt.value}`;
+            return (
+              <div key={opt.value} className="flex items-center gap-1">
+                <label className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors flex-1 ${
+                  answer === opt.value
+                    ? opt.isPositiveScreen ? "bg-red-50 border border-red-200" : "bg-cs-badge border border-cs-blue/20"
+                    : "hover:bg-cs-bg border border-transparent"
+                }`}>
+                  <input
+                    type="radio"
+                    name={question.id}
+                    value={opt.value}
+                    checked={answer === opt.value}
+                    onChange={() => onAnswer(question.id, opt.value)}
+                    className="accent-cs-blue"
+                  />
+                  <HighlightedText
+                    text={optText}
+                    localCharIndex={getHighlightPosition(optId, tts)}
+                    className={`font-body text-sm ${opt.isDecline ? "text-cs-text/40 italic" : "text-cs-text"}`}
+                  />
+                </label>
+                <SpeakerButton
+                  size="sm"
+                  isActive={tts.speakingId === optId}
+                  onClick={(e) => { e.preventDefault(); tts.speak(optId, optText, lang); }}
+                />
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -601,22 +734,33 @@ function QuestionCard({ question, answer, onAnswer, onToggle, lang = "en", tts }
         <div className="space-y-2">
           {question.options.map((opt) => {
             const checked = Array.isArray(answer) && answer.includes(opt.value);
+            const optText = t(opt.label, opt.labelEs, lang);
+            const optId = `${question.id}:${opt.value}`;
             return (
-              <label key={opt.value} className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors ${
-                checked
-                  ? opt.isPositiveScreen ? "bg-red-50 border border-red-200" : "bg-cs-badge border border-cs-blue/20"
-                  : "hover:bg-cs-bg border border-transparent"
-              }`}>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => onToggle(question.id, opt.value)}
-                  className="accent-cs-blue rounded"
+              <div key={opt.value} className="flex items-center gap-1">
+                <label className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors flex-1 ${
+                  checked
+                    ? opt.isPositiveScreen ? "bg-red-50 border border-red-200" : "bg-cs-badge border border-cs-blue/20"
+                    : "hover:bg-cs-bg border border-transparent"
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => onToggle(question.id, opt.value)}
+                    className="accent-cs-blue rounded"
+                  />
+                  <HighlightedText
+                    text={optText}
+                    localCharIndex={getHighlightPosition(optId, tts)}
+                    className={`font-body text-sm ${opt.isDecline ? "text-cs-text/40 italic" : "text-cs-text"}`}
+                  />
+                </label>
+                <SpeakerButton
+                  size="sm"
+                  isActive={tts.speakingId === optId}
+                  onClick={(e) => { e.preventDefault(); tts.speak(optId, optText, lang); }}
                 />
-                <span className={`font-body text-sm ${opt.isDecline ? "text-cs-text/40 italic" : "text-cs-text"}`}>
-                  {t(opt.label, opt.labelEs, lang)}
-                </span>
-              </label>
+              </div>
             );
           })}
         </div>
@@ -1035,11 +1179,44 @@ function AhcQuestionCard({ question, answer, onAnswer, onToggle, lang = "en", tt
   tts: ReturnType<typeof useTTS>;
 }) {
   const questionText = t(question.text, question.textEs, lang);
+  const readAllId = `${question.id}:all`;
+
+  // Build "read all" text + segments for karaoke-style highlighting sync
+  const readAllSegments: SpeakSegment[] = [
+    { id: question.id, start: 0, end: questionText.length },
+  ];
+  const parts: string[] = [questionText];
+  let cursor = questionText.length;
+  for (const opt of question.options) {
+    const optText = t(opt.label, opt.labelEs, lang);
+    const sep = ". ";
+    const segStart = cursor + sep.length;
+    parts.push(optText);
+    readAllSegments.push({ id: `${question.id}:${opt.value}`, start: segStart, end: segStart + optText.length });
+    cursor = segStart + optText.length;
+  }
+  const readAllText = parts.join(". ");
 
   return (
     <div className="border border-cs-border rounded-lg p-5 bg-white">
       <div className="flex items-start gap-2 mb-3">
-        <p className="font-body text-sm text-cs-text flex-1">{questionText}</p>
+        <p className="font-body text-sm text-cs-text flex-1">
+          <HighlightedText text={questionText} localCharIndex={getHighlightPosition(question.id, tts)} />
+        </p>
+        <button
+          type="button"
+          onClick={() => tts.speak(readAllId, readAllText, lang, readAllSegments)}
+          className={`shrink-0 px-2 py-1 rounded-md text-[11px] font-body font-medium transition-colors ${
+            tts.speakingId === readAllId
+              ? "text-cs-blue bg-cs-blue/10"
+              : "text-cs-text/40 hover:text-cs-blue hover:bg-cs-blue/5"
+          }`}
+          aria-label={lang === "es" ? "Leer pregunta y opciones" : "Read question and options"}
+        >
+          {tts.speakingId === readAllId
+            ? (lang === "es" ? "Detener" : "Stop")
+            : (lang === "es" ? "Leer todo" : "Read all")}
+        </button>
         <SpeakerButton
           isActive={tts.speakingId === question.id}
           onClick={() => tts.speak(question.id, questionText, lang)}
@@ -1048,25 +1225,38 @@ function AhcQuestionCard({ question, answer, onAnswer, onToggle, lang = "en", tt
 
       {question.type === "radio" && (
         <div className="space-y-2">
-          {question.options.map((opt) => (
-            <label key={opt.value} className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors ${
-              answer === opt.value
-                ? opt.isPositiveScreen ? "bg-red-50 border border-red-200" : "bg-cs-badge border border-cs-blue/20"
-                : "hover:bg-cs-bg border border-transparent"
-            }`}>
-              <input
-                type="radio"
-                name={question.id}
-                value={opt.value}
-                checked={answer === opt.value}
-                onChange={() => onAnswer(question.id, opt.value)}
-                className="accent-cs-blue"
-              />
-              <span className="font-body text-sm text-cs-text">
-                {t(opt.label, opt.labelEs, lang)}
-              </span>
-            </label>
-          ))}
+          {question.options.map((opt) => {
+            const optText = t(opt.label, opt.labelEs, lang);
+            const optId = `${question.id}:${opt.value}`;
+            return (
+              <div key={opt.value} className="flex items-center gap-1">
+                <label className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors flex-1 ${
+                  answer === opt.value
+                    ? opt.isPositiveScreen ? "bg-red-50 border border-red-200" : "bg-cs-badge border border-cs-blue/20"
+                    : "hover:bg-cs-bg border border-transparent"
+                }`}>
+                  <input
+                    type="radio"
+                    name={question.id}
+                    value={opt.value}
+                    checked={answer === opt.value}
+                    onChange={() => onAnswer(question.id, opt.value)}
+                    className="accent-cs-blue"
+                  />
+                  <HighlightedText
+                    text={optText}
+                    localCharIndex={getHighlightPosition(optId, tts)}
+                    className="font-body text-sm text-cs-text"
+                  />
+                </label>
+                <SpeakerButton
+                  size="sm"
+                  isActive={tts.speakingId === optId}
+                  onClick={(e) => { e.preventDefault(); tts.speak(optId, optText, lang); }}
+                />
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -1074,22 +1264,33 @@ function AhcQuestionCard({ question, answer, onAnswer, onToggle, lang = "en", tt
         <div className="space-y-2">
           {question.options.map((opt) => {
             const checked = Array.isArray(answer) && answer.includes(opt.value);
+            const optText = t(opt.label, opt.labelEs, lang);
+            const optId = `${question.id}:${opt.value}`;
             return (
-              <label key={opt.value} className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors ${
-                checked
-                  ? opt.isPositiveScreen ? "bg-red-50 border border-red-200" : "bg-cs-badge border border-cs-blue/20"
-                  : "hover:bg-cs-bg border border-transparent"
-              }`}>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => onToggle(question.id, opt.value)}
-                  className="accent-cs-blue rounded"
+              <div key={opt.value} className="flex items-center gap-1">
+                <label className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors flex-1 ${
+                  checked
+                    ? opt.isPositiveScreen ? "bg-red-50 border border-red-200" : "bg-cs-badge border border-cs-blue/20"
+                    : "hover:bg-cs-bg border border-transparent"
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => onToggle(question.id, opt.value)}
+                    className="accent-cs-blue rounded"
+                  />
+                  <HighlightedText
+                    text={optText}
+                    localCharIndex={getHighlightPosition(optId, tts)}
+                    className="font-body text-sm text-cs-text"
+                  />
+                </label>
+                <SpeakerButton
+                  size="sm"
+                  isActive={tts.speakingId === optId}
+                  onClick={(e) => { e.preventDefault(); tts.speak(optId, optText, lang); }}
                 />
-                <span className="font-body text-sm text-cs-text">
-                  {t(opt.label, opt.labelEs, lang)}
-                </span>
-              </label>
+              </div>
             );
           })}
         </div>
