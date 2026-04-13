@@ -2,8 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
+html, body {
   margin: 0;
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+/* Prevent long unbreakable strings (FIPS codes, URLs) from forcing horizontal scroll */
+body {
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
 
 /* Leaflet SVI tooltip */
