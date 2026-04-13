@@ -10,12 +10,103 @@ import {
 import SVIMapView from "./SVIMap";
 import {
   saveScreeningEntry, getScreeningLog, clearScreeningLog,
-  exportScreeningLogCSV, downloadCSV,
-  type ScreeningLogEntry,
+  exportScreeningLogCSV, downloadCSV, getCurrentTract, testGeocoding,
+  type ScreeningLogEntry, type TractTestResult,
 } from "./screening-log";
 
 function t(en: string, es: string | undefined, lang: Lang): string {
   return lang === "es" && es ? es : en;
+}
+
+// Keywords for matching PRAPARE flags to Z_CODE_MAPPINGS domains.
+// The mapping's own domain/trigger text doesn't reliably appear in flag strings
+// (which are truncated question text for radio, or checkbox option labels).
+// These keywords are chosen to match the actual question/answer text.
+const PRAPARE_MAPPING_KEYWORDS: Record<string, string[]> = {
+  "Housing": ["housing situation", "not have housing", "homeless"],
+  "Housing stability": ["losing your housing", "worried about losing"],
+  "Education": ["less than high school", "highest level of school"],
+  "Employment": ["unemployed", "current work situation"],
+  "Food insecurity": ["food"],
+  "Utilities": ["utilit"],
+  "Transportation": ["transportation", "transport"],
+  "Social isolation": ["see or talk", "people that you care", "once a week"],
+  "Stress": ["stress"],
+  "Incarceration": ["jail", "prison", "detention", "correctional"],
+  "Safety": ["physically and emotionally safe", "safe where you"],
+  "Healthcare access": ["medicine", "health care", "medical appointments"],
+};
+
+function getMatchingZCodesForPrapare(flags: string[]): string[] {
+  if (flags.length === 0) return [];
+  const flagsText = flags.join(" ").toLowerCase();
+  const matched: string[] = [];
+  for (const mapping of Z_CODE_MAPPINGS) {
+    const keywords = PRAPARE_MAPPING_KEYWORDS[mapping.domain] || [mapping.domain.toLowerCase()];
+    if (keywords.some((k) => flagsText.includes(k.toLowerCase()))) {
+      matched.push(...mapping.codes.map((c) => c.code));
+    }
+  }
+  return [...new Set(matched)];
+}
+
+// ─── Tract Location Test ─────────────────────────────────────────────────────
+
+function TractLocationTest({ lang }: { lang: Lang }) {
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<TractTestResult | null>(null);
+
+  const runTest = useCallback(async () => {
+    setTesting(true);
+    setResult(null);
+    try {
+      const r = await testGeocoding();
+      setResult(r);
+    } catch (err) {
+      setResult({ ok: false, geolocationError: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setTesting(false);
+    }
+  }, []);
+
+  return (
+    <div className="flex items-start gap-2 mt-2">
+      <button
+        onClick={runTest}
+        disabled={testing}
+        className="font-body text-xs font-medium text-cs-blue border border-cs-blue/30 hover:border-cs-blue px-3 py-1.5 rounded-md transition-colors disabled:opacity-40"
+      >
+        {testing
+          ? (lang === "es" ? "Probando..." : "Testing...")
+          : (lang === "es" ? "Probar ubicación" : "Test location")}
+      </button>
+      {result && (
+        <div className="flex-1 text-xs font-body space-y-1">
+          {result.ok && result.tract ? (
+            <p className="text-green-700">
+              {lang === "es" ? "✓ Éxito" : "✓ Success"}: {result.tract.fips}
+              {result.tract.county && ` (${result.tract.county}, ${result.tract.state})`}
+              {result.cached && (lang === "es" ? " — desde caché" : " — from cache")}
+              {result.fccResult === "success" && (lang === "es" ? " — vía FCC" : " — via FCC")}
+              {result.censusResult === "success" && (lang === "es" ? " — vía Census (FCC falló)" : " — via Census (FCC failed)")}
+            </p>
+          ) : (
+            <>
+              {result.geolocationError && (
+                <p className="text-red-700">{lang === "es" ? "Geolocalización" : "Geolocation"}: {result.geolocationError}</p>
+              )}
+              {result.fccError && (
+                <p className="text-red-700">FCC: {result.fccError}</p>
+              )}
+              {result.censusError && (
+                <p className="text-red-700">Census: {result.censusError}</p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Text-to-Speech ──────────────────────────────────────────────────────────
@@ -102,14 +193,15 @@ function PrapareScreening() {
   const toggleCheckbox = useCallback((qId: string, value: string) => {
     setAnswers((prev) => {
       const current = (prev[qId] as string[]) || [];
-      // "decline" is mutually exclusive with all other options
-      if (value === "decline") {
-        return { ...prev, [qId]: current.includes("decline") ? [] : ["decline"] };
+      // "decline" and "no" are mutually exclusive with all other options
+      const EXCLUSIVE = new Set(["decline", "no"]);
+      if (EXCLUSIVE.has(value)) {
+        return { ...prev, [qId]: current.includes(value) ? [] : [value] };
       }
-      const withoutDecline = current.filter((v) => v !== "decline");
-      const next = withoutDecline.includes(value)
-        ? withoutDecline.filter((v) => v !== value)
-        : [...withoutDecline, value];
+      const filtered = current.filter((v) => !EXCLUSIVE.has(v));
+      const next = filtered.includes(value)
+        ? filtered.filter((v) => v !== value)
+        : [...filtered, value];
       return { ...prev, [qId]: next };
     });
   }, []);
@@ -153,17 +245,17 @@ function PrapareScreening() {
   const answeredCount = Object.keys(answers).length;
   const totalQuestions = QUESTIONS.length;
   const [saved, setSaved] = useState(false);
+  const [tagTract, setTagTract] = useState(false);
+  const [savingTract, setSavingTract] = useState(false);
+  const [tractError, setTractError] = useState<string | null>(null);
 
-  const handleSaveResult = useCallback(() => {
-    const zCodes: string[] = [];
+  const handleSaveResult = useCallback(async () => {
+    // Collect all positive-screen flags across all domains, then match Z codes
+    const allFlags: string[] = [];
     for (const d of DOMAINS) {
-      if ((riskFlags[d.id] || []).length > 0) {
-        const matched = Z_CODE_MAPPINGS
-          .filter((m) => m.domain.toLowerCase().includes(d.label.toLowerCase().split(" ")[0]))
-          .flatMap((m) => m.codes.map((c) => c.code));
-        zCodes.push(...matched);
-      }
+      allFlags.push(...(riskFlags[d.id] || []));
     }
+    const zCodes = getMatchingZCodesForPrapare(allFlags);
     const entry: ScreeningLogEntry = {
       id: crypto.randomUUID(),
       date: new Date().toISOString(),
@@ -176,11 +268,39 @@ function PrapareScreening() {
         flagCount: (riskFlags[d.id] || []).length,
         flags: riskFlags[d.id] || [],
       })),
-      suggestedZCodes: [...new Set(zCodes)],
+      suggestedZCodes: zCodes,
     };
+
+    if (tagTract) {
+      setSavingTract(true);
+      setTractError(null);
+      try {
+        const tract = await getCurrentTract();
+        if (!tract) {
+          setTractError(lang === "es"
+            ? "No se pudo determinar el tracto censal. Puede intentar de nuevo o desmarcar la casilla para guardar sin tracto."
+            : "Could not determine census tract. Try again, or uncheck the box to save without tract.");
+          setSavingTract(false);
+          return; // Do not save -- user explicitly opted in and failed
+        }
+        entry.censusTract = tract.fips;
+        entry.county = tract.county;
+        entry.state = tract.state;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setTractError(lang === "es"
+          ? `Ubicación falló: ${msg} Puede intentar de nuevo o desmarcar la casilla para guardar sin tracto.`
+          : `Location failed: ${msg} Try again, or uncheck the box to save without tract.`);
+        setSavingTract(false);
+        return; // Do not save -- user explicitly opted in and failed
+      } finally {
+        setSavingTract(false);
+      }
+    }
+
     saveScreeningEntry(entry);
     setSaved(true);
-  }, [riskFlags, riskLevel, domainsWithFlags, totalFlags]);
+  }, [riskFlags, riskLevel, domainsWithFlags, totalFlags, tagTract, lang]);
 
   return (
     <div>
@@ -332,21 +452,19 @@ function PrapareScreening() {
                   <div className="border-t border-cs-border pt-3 mt-3">
                     <p className="font-body text-xs text-cs-text/50 mb-1">Suggested ICD-10 Z codes:</p>
                     <div className="flex flex-wrap gap-1.5">
-                      {/* Show relevant Z codes for this domain */}
-                      {Z_CODE_MAPPINGS
-                        .filter((m) => {
-                          const domainLower = d.label.toLowerCase();
-                          return m.domain.toLowerCase().includes(domainLower.split(" ")[0]) ||
-                            flags.some((f) => f.toLowerCase().includes(m.domain.toLowerCase()));
-                        })
-                        .flatMap((m) => m.codes)
-                        .filter((c, i, arr) => arr.findIndex((x) => x.code === c.code) === i)
-                        .slice(0, 4)
-                        .map((c) => (
-                          <span key={c.code} className="font-mono text-xs bg-cs-badge text-cs-blue-dark px-2 py-0.5 rounded">
-                            {c.code} {c.description}
-                          </span>
-                        ))}
+                      {(() => {
+                        const codes = getMatchingZCodesForPrapare(flags);
+                        return Z_CODE_MAPPINGS
+                          .flatMap((m) => m.codes)
+                          .filter((c) => codes.includes(c.code))
+                          .filter((c, i, arr) => arr.findIndex((x) => x.code === c.code) === i)
+                          .slice(0, 4)
+                          .map((c) => (
+                            <span key={c.code} className="font-mono text-xs bg-cs-badge text-cs-blue-dark px-2 py-0.5 rounded">
+                              {c.code} {c.description}
+                            </span>
+                          ));
+                      })()}
                     </div>
                   </div>
                 )}
@@ -362,31 +480,69 @@ function PrapareScreening() {
               {lang === "es" ? "Volver a las Preguntas" : "Back to Questions"}
             </button>
             <button
-              onClick={() => { setAnswers({}); setShowResults(false); setActiveDomain(DOMAINS[0].id); setSaved(false); }}
+              onClick={() => { setAnswers({}); setShowResults(false); setActiveDomain(DOMAINS[0].id); setSaved(false); setTagTract(false); setTractError(null); }}
               className="font-body text-sm font-medium text-cs-text-muted border border-cs-text/20 hover:border-cs-text/40 px-5 py-2.5 rounded-lg transition-colors"
             >
               {lang === "es" ? "Comenzar de Nuevo" : "Start Over"}
             </button>
             <button
               onClick={handleSaveResult}
-              disabled={saved}
+              disabled={saved || savingTract}
               className={`font-body text-sm font-medium px-5 py-2.5 rounded-lg transition-colors ${
                 saved
                   ? "bg-green-100 text-green-700 border border-green-200"
-                  : "text-white bg-cs-blue hover:bg-cs-blue-dark"
+                  : "text-white bg-cs-blue hover:bg-cs-blue-dark disabled:opacity-60"
               }`}
             >
-              {saved
+              {savingTract
+                ? (lang === "es" ? "Obteniendo ubicación..." : "Getting location...")
+                : saved
                 ? (lang === "es" ? "Guardado en el registro" : "Saved to Log")
                 : (lang === "es" ? "Guardar Resultado" : "Save to Screening Log")}
             </button>
           </div>
 
+          {!saved && (
+            <div className="rounded-lg border border-cs-border bg-white p-3 space-y-2">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={tagTract}
+                  onChange={(e) => { setTagTract(e.target.checked); setTractError(null); }}
+                  className="accent-cs-blue mt-0.5"
+                />
+                <div className="flex-1">
+                  <p className="font-body text-sm text-cs-text">
+                    {lang === "es" ? "Etiquetar con tracto censal (anónimo)" : "Tag with census tract (anonymous)"}
+                  </p>
+                  <p className="font-body text-xs text-cs-text/50 mt-0.5">
+                    {lang === "es"
+                      ? "Usa la ubicación del dispositivo para identificar el tracto censal de EE. UU. Solo se guarda el código FIPS del tracto (desidentificado por estándar HIPAA). No se almacena latitud/longitud."
+                      : "Uses device location to identify the US Census tract. Only the tract FIPS code is saved (HIPAA Safe Harbor de-identified). No lat/lon is stored."}
+                  </p>
+                </div>
+              </label>
+              <TractLocationTest lang={lang} />
+              {tractError && (
+                <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 flex items-start gap-2">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-red-600 shrink-0 mt-0.5">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                  <p className="font-body text-xs text-red-700">{tractError}</p>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="rounded-lg bg-cs-bg p-4">
             <p className="font-body text-xs text-cs-text/50">
               <strong className="text-cs-text/70">Disclaimer:</strong> This tool implements the published
               PRAPARE screening instrument (NACHC, 2019). Results saved to the screening log are stored in
-              your browser's local storage only. No data is transmitted. Consult your
+              your browser's local storage only. No data is transmitted to Cleansheet. If you opt in to
+              census tract tagging, your browser's location is sent to the US Census Bureau's public
+              geocoder to determine the tract FIPS code; the lat/lon is not retained. Consult your
               clinical team for interpretation and care planning. This is not a medical device.
             </p>
           </div>
@@ -555,8 +711,11 @@ function AhcHrsnScreening() {
   const answeredCount = Object.keys(answers).length;
   const totalQuestions = AHC_QUESTIONS.length;
   const [saved, setSaved] = useState(false);
+  const [tagTract, setTagTract] = useState(false);
+  const [savingTract, setSavingTract] = useState(false);
+  const [tractError, setTractError] = useState<string | null>(null);
 
-  const handleSaveResult = useCallback(() => {
+  const handleSaveResult = useCallback(async () => {
     const zCodes: string[] = [];
     for (const d of AHC_DOMAINS) {
       if ((riskFlags[d.id] || []).length > 0) {
@@ -580,9 +739,37 @@ function AhcHrsnScreening() {
       })),
       suggestedZCodes: [...new Set(zCodes)],
     };
+
+    if (tagTract) {
+      setSavingTract(true);
+      setTractError(null);
+      try {
+        const tract = await getCurrentTract();
+        if (!tract) {
+          setTractError(lang === "es"
+            ? "No se pudo determinar el tracto censal. Puede intentar de nuevo o desmarcar la casilla para guardar sin tracto."
+            : "Could not determine census tract. Try again, or uncheck the box to save without tract.");
+          setSavingTract(false);
+          return;
+        }
+        entry.censusTract = tract.fips;
+        entry.county = tract.county;
+        entry.state = tract.state;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setTractError(lang === "es"
+          ? `Ubicación falló: ${msg} Puede intentar de nuevo o desmarcar la casilla para guardar sin tracto.`
+          : `Location failed: ${msg} Try again, or uncheck the box to save without tract.`);
+        setSavingTract(false);
+        return;
+      } finally {
+        setSavingTract(false);
+      }
+    }
+
     saveScreeningEntry(entry);
     setSaved(true);
-  }, [riskFlags, overallRisk, domainsWithFlags, totalFlags]);
+  }, [riskFlags, overallRisk, domainsWithFlags, totalFlags, tagTract, lang]);
 
   return (
     <div>
@@ -764,32 +951,68 @@ function AhcHrsnScreening() {
               {lang === "es" ? "Volver a las Preguntas" : "Back to Questions"}
             </button>
             <button
-              onClick={() => { setAnswers({}); setShowResults(false); setActiveDomain(AHC_DOMAINS[0].id); setSaved(false); }}
+              onClick={() => { setAnswers({}); setShowResults(false); setActiveDomain(AHC_DOMAINS[0].id); setSaved(false); setTagTract(false); setTractError(null); }}
               className="font-body text-sm font-medium text-cs-text-muted border border-cs-text/20 hover:border-cs-text/40 px-5 py-2.5 rounded-lg transition-colors"
             >
               {lang === "es" ? "Comenzar de Nuevo" : "Start Over"}
             </button>
             <button
               onClick={handleSaveResult}
-              disabled={saved}
+              disabled={saved || savingTract}
               className={`font-body text-sm font-medium px-5 py-2.5 rounded-lg transition-colors ${
                 saved
                   ? "bg-green-100 text-green-700 border border-green-200"
-                  : "text-white bg-cs-blue hover:bg-cs-blue-dark"
+                  : "text-white bg-cs-blue hover:bg-cs-blue-dark disabled:opacity-60"
               }`}
             >
-              {saved
+              {savingTract
+                ? (lang === "es" ? "Obteniendo ubicación..." : "Getting location...")
+                : saved
                 ? (lang === "es" ? "Guardado en el registro" : "Saved to Log")
                 : (lang === "es" ? "Guardar Resultado" : "Save to Screening Log")}
             </button>
           </div>
 
+          {!saved && (
+            <div className="rounded-lg border border-cs-border bg-white p-3 space-y-2">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={tagTract}
+                  onChange={(e) => { setTagTract(e.target.checked); setTractError(null); }}
+                  className="accent-cs-blue mt-0.5"
+                />
+                <div className="flex-1">
+                  <p className="font-body text-sm text-cs-text">
+                    {lang === "es" ? "Etiquetar con tracto censal (anónimo)" : "Tag with census tract (anonymous)"}
+                  </p>
+                  <p className="font-body text-xs text-cs-text/50 mt-0.5">
+                    {lang === "es"
+                      ? "Usa la ubicación del dispositivo para identificar el tracto censal de EE. UU. Solo se guarda el código FIPS del tracto (desidentificado por estándar HIPAA). No se almacena latitud/longitud."
+                      : "Uses device location to identify the US Census tract. Only the tract FIPS code is saved (HIPAA Safe Harbor de-identified). No lat/lon is stored."}
+                  </p>
+                </div>
+              </label>
+              <TractLocationTest lang={lang} />
+              {tractError && (
+                <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 flex items-start gap-2">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-red-600 shrink-0 mt-0.5">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                  <p className="font-body text-xs text-red-700">{tractError}</p>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="rounded-lg bg-cs-bg p-4">
             <p className="font-body text-xs text-cs-text/50">
               <strong className="text-cs-text/70">{lang === "es" ? "Aviso:" : "Disclaimer:"}</strong>{" "}
               {lang === "es"
-                ? "Esta herramienta implementa el instrumento de evaluación AHC-HRSN desarrollado por CMS. Los resultados guardados se almacenan solo en el almacenamiento local de su navegador. No se transmiten datos. Consulte a su equipo clínico para la interpretación y planificación del cuidado. Esto no es un dispositivo médico."
-                : "This tool implements the CMS-developed AHC-HRSN screening instrument. Results saved to the screening log are stored in your browser's local storage only. No data is transmitted. Consult your clinical team for interpretation and care planning. This is not a medical device."}
+                ? "Esta herramienta implementa el instrumento de evaluación AHC-HRSN desarrollado por CMS. Los resultados guardados se almacenan solo en el almacenamiento local de su navegador. No se transmiten datos a Cleansheet. Si opta por etiquetar el tracto censal, la ubicación de su navegador se envía al geocodificador público del Census Bureau para determinar el código FIPS del tracto; no se conserva la latitud/longitud. Consulte a su equipo clínico para la interpretación y planificación del cuidado. Esto no es un dispositivo médico."
+                : "This tool implements the CMS-developed AHC-HRSN screening instrument. Results saved to the screening log are stored in your browser's local storage only. No data is transmitted to Cleansheet. If you opt in to census tract tagging, your browser's location is sent to the US Census Bureau's public geocoder to determine the tract FIPS code; the lat/lon is not retained. Consult your clinical team for interpretation and care planning. This is not a medical device."}
             </p>
           </div>
         </div>
@@ -996,6 +1219,7 @@ function ScreeningLogView() {
                 <th className="text-left px-4 py-2 font-body font-medium text-cs-text">Risk</th>
                 <th className="text-left px-4 py-2 font-body font-medium text-cs-text">Domains</th>
                 <th className="text-left px-4 py-2 font-body font-medium text-cs-text">Flags</th>
+                <th className="text-left px-4 py-2 font-body font-medium text-cs-text">Tract</th>
                 <th className="text-left px-4 py-2 font-body font-medium text-cs-text">Z Codes</th>
               </tr>
             </thead>
@@ -1021,6 +1245,9 @@ function ScreeningLogView() {
                   </td>
                   <td className="px-4 py-2 font-body text-cs-text/70">{entry.domainsWithFlags}/{entry.domains.length}</td>
                   <td className="px-4 py-2 font-body text-cs-text/70">{entry.totalFlags}</td>
+                  <td className="px-4 py-2 font-mono text-xs text-cs-text/70" title={entry.county && entry.state ? `${entry.county}, ${entry.state}` : ""}>
+                    {entry.censusTract || <span className="text-cs-text/30">—</span>}
+                  </td>
                   <td className="px-4 py-2">
                     <div className="flex flex-wrap gap-1">
                       {entry.suggestedZCodes.slice(0, 3).map((z) => (
@@ -1050,12 +1277,13 @@ function ScreeningLogView() {
             const prapare = log.filter((e) => e.instrument === "PRAPARE");
             const ahc = log.filter((e) => e.instrument === "AHC-HRSN");
             const highRisk = log.filter((e) => e.overallRisk === "High");
-            const avgFlags = log.reduce((s, e) => s + e.totalFlags, 0) / log.length;
+            const tagged = log.filter((e) => e.censusTract).length;
+            const uniqueTracts = new Set(log.map((e) => e.censusTract).filter(Boolean)).size;
             return [
               { label: "PRAPARE", value: String(prapare.length) },
               { label: "AHC-HRSN", value: String(ahc.length) },
               { label: "High Risk", value: String(highRisk.length) },
-              { label: "Avg Flags", value: avgFlags.toFixed(1) },
+              { label: "Unique Tracts", value: tagged > 0 ? `${uniqueTracts} of ${tagged} tagged` : "—" },
             ];
           })().map((s) => (
             <div key={s.label} className="border border-cs-border rounded-lg bg-white p-3">
@@ -1069,9 +1297,10 @@ function ScreeningLogView() {
       <div className="rounded-lg bg-cs-bg p-4">
         <p className="font-body text-xs text-cs-text/50">
           <strong className="text-cs-text/70">Storage:</strong> All screening log data is stored in your browser's
-          local storage. Nothing is transmitted. Export as CSV to open in Excel, Google Sheets, or any spreadsheet
-          application. No patient-identifying information is stored -- only dates, risk levels, domain scores, and
-          suggested Z codes.
+          local storage. Nothing is transmitted to Cleansheet. Export as CSV to open in Excel, Google Sheets, or
+          any spreadsheet application. No patient-identifying information is stored -- only dates, risk levels,
+          domain scores, suggested Z codes, and optionally a census tract FIPS code if you opted in at save time
+          (tract codes are HIPAA Safe Harbor de-identifiable; lat/lon is never retained).
         </p>
       </div>
     </div>
@@ -1315,6 +1544,16 @@ export default function App() {
                   suggested Z codes. You can export the log as CSV and clear it at
                   any time. Unsaved screening responses are discarded when you close
                   the page.
+                </p>
+                <p>
+                  <strong>Optional census tract tagging:</strong> When saving a
+                  screening you can opt in to tag the result with a US Census tract
+                  FIPS code. If you do, your browser's location is sent once to the
+                  US Census Bureau's public geocoder to look up the tract; the
+                  lat/lon coordinates are discarded and only the tract FIPS (HIPAA
+                  Safe Harbor de-identifiable, ~4,000 people per tract) is stored.
+                  This enables cross-referencing with CDC SVI scores and aggregate
+                  geographic reporting for community needs assessments.
                 </p>
                 <p>
                   If your organization needs EHR integration or population-level
