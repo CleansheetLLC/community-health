@@ -263,6 +263,9 @@ type Answers = Record<string, string | string[] | number>;
 
 function PrapareScreening() {
   const [answers, setAnswers] = useState<Answers>({});
+  // Free-text companions for options with allowsOther. Session-only; never persisted
+  // to the de-identified screening log.
+  const [otherText, setOtherTextState] = useState<Record<string, string>>({});
   const [showResults, setShowResults] = useState(false);
   const [activeDomain, setActiveDomain] = useState(DOMAINS[0].id);
   const [lang, setLang] = useState<Lang>("en");
@@ -270,6 +273,14 @@ function PrapareScreening() {
 
   const setAnswer = useCallback((qId: string, value: string | string[] | number) => {
     setAnswers((prev) => ({ ...prev, [qId]: value }));
+    // For radio questions, clear any stale "other" text if the user switched off "other".
+    if (value !== "other") {
+      setOtherTextState((prev) => {
+        if (!(qId in prev)) return prev;
+        const { [qId]: _, ...rest } = prev;
+        return rest;
+      });
+    }
   }, []);
 
   const toggleCheckbox = useCallback((qId: string, value: string) => {
@@ -286,6 +297,19 @@ function PrapareScreening() {
         : [...filtered, value];
       return { ...prev, [qId]: next };
     });
+    // If the user just unchecked "other", clear its companion text.
+    if (value === "other") {
+      setOtherTextState((prev) => {
+        const wasChecked = Array.isArray(answers[qId]) && (answers[qId] as string[]).includes("other");
+        if (!wasChecked) return prev; // just got checked -> keep empty string until typed
+        const { [qId]: _, ...rest } = prev;
+        return rest;
+      });
+    }
+  }, [answers]);
+
+  const setOtherText = useCallback((qId: string, value: string) => {
+    setOtherTextState((prev) => ({ ...prev, [qId]: value }));
   }, []);
 
   const domainQuestions = useMemo(
@@ -437,8 +461,10 @@ function PrapareScreening() {
                 key={q.id}
                 question={q}
                 answer={answers[q.id]}
+                otherText={otherText[q.id] ?? ""}
                 onAnswer={setAnswer}
                 onToggle={toggleCheckbox}
+                onOtherText={setOtherText}
                 lang={lang}
                 tts={tts}
               />
@@ -564,7 +590,7 @@ function PrapareScreening() {
                   {lang === "es" ? "Volver a las Preguntas" : "Back to Questions"}
                 </button>
                 <button
-                  onClick={() => { setAnswers({}); setShowResults(false); setActiveDomain(DOMAINS[0].id); setSaved(false); setTagTract(false); setTractError(null); }}
+                  onClick={() => { setAnswers({}); setOtherTextState({}); setShowResults(false); setActiveDomain(DOMAINS[0].id); setSaved(false); setTagTract(false); setTractError(null); }}
                   className="font-body text-sm font-medium text-cs-text-muted border border-cs-text/20 hover:border-cs-text/40 px-5 py-2.5 rounded-lg transition-colors"
                 >
                   {lang === "es" ? "Comenzar de Nuevo" : "Start Over"}
@@ -646,11 +672,13 @@ function PrapareScreening() {
   );
 }
 
-function QuestionCard({ question, answer, onAnswer, onToggle, lang = "en", tts }: {
+function QuestionCard({ question, answer, otherText = "", onAnswer, onToggle, onOtherText, lang = "en", tts }: {
   question: PrapareQuestion;
   answer: string | string[] | number | undefined;
+  otherText?: string;
   onAnswer: (qId: string, value: string | string[] | number) => void;
   onToggle: (qId: string, value: string) => void;
+  onOtherText?: (qId: string, value: string) => void;
   lang?: Lang;
   tts: ReturnType<typeof useTTS>;
 }) {
@@ -709,32 +737,45 @@ function QuestionCard({ question, answer, onAnswer, onToggle, lang = "en", tts }
           {question.options.map((opt) => {
             const optText = t(opt.label, opt.labelEs, lang);
             const optId = `${question.id}:${opt.value}`;
+            const showOtherInput = opt.allowsOther && answer === opt.value;
             return (
-              <div key={opt.value} className="flex items-center gap-1">
-                <label className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors flex-1 ${
-                  answer === opt.value
-                    ? opt.isPositiveScreen ? "bg-red-50 border border-red-200" : "bg-cs-badge border border-cs-blue/20"
-                    : "hover:bg-cs-bg border border-transparent"
-                }`}>
+              <div key={opt.value} className="space-y-2">
+                <div className="flex items-center gap-1">
+                  <label className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors flex-1 ${
+                    answer === opt.value
+                      ? opt.isPositiveScreen ? "bg-red-50 border border-red-200" : "bg-cs-badge border border-cs-blue/20"
+                      : "hover:bg-cs-bg border border-transparent"
+                  }`}>
+                    <input
+                      type="radio"
+                      name={question.id}
+                      value={opt.value}
+                      checked={answer === opt.value}
+                      onChange={() => onAnswer(question.id, opt.value)}
+                      className="accent-cs-blue"
+                    />
+                    <HighlightedText
+                      text={optText}
+                      localCharIndex={getHighlightPosition(optId, tts)}
+                      className={`font-body text-sm ${opt.isDecline ? "text-cs-text/40 italic" : "text-cs-text"}`}
+                    />
+                  </label>
+                  <SpeakerButton
+                    size="sm"
+                    isActive={tts.speakingId === optId}
+                    onClick={(e) => { e.preventDefault(); tts.speak(optId, optText, lang); }}
+                  />
+                </div>
+                {showOtherInput && onOtherText && (
                   <input
-                    type="radio"
-                    name={question.id}
-                    value={opt.value}
-                    checked={answer === opt.value}
-                    onChange={() => onAnswer(question.id, opt.value)}
-                    className="accent-cs-blue"
+                    type="text"
+                    value={otherText}
+                    onChange={(e) => onOtherText(question.id, e.target.value)}
+                    placeholder={t(opt.otherPlaceholder ?? "Please specify", opt.otherPlaceholderEs, lang)}
+                    aria-label={t(opt.otherPlaceholder ?? "Please specify", opt.otherPlaceholderEs, lang)}
+                    className="ml-9 w-[calc(100%-2.25rem)] px-3 py-2 rounded-md border border-cs-border bg-white font-body text-sm text-cs-text focus:outline-none focus:border-cs-blue"
                   />
-                  <HighlightedText
-                    text={optText}
-                    localCharIndex={getHighlightPosition(optId, tts)}
-                    className={`font-body text-sm ${opt.isDecline ? "text-cs-text/40 italic" : "text-cs-text"}`}
-                  />
-                </label>
-                <SpeakerButton
-                  size="sm"
-                  isActive={tts.speakingId === optId}
-                  onClick={(e) => { e.preventDefault(); tts.speak(optId, optText, lang); }}
-                />
+                )}
               </div>
             );
           })}
@@ -747,30 +788,43 @@ function QuestionCard({ question, answer, onAnswer, onToggle, lang = "en", tts }
             const checked = Array.isArray(answer) && answer.includes(opt.value);
             const optText = t(opt.label, opt.labelEs, lang);
             const optId = `${question.id}:${opt.value}`;
+            const showOtherInput = opt.allowsOther && checked;
             return (
-              <div key={opt.value} className="flex items-center gap-1">
-                <label className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors flex-1 ${
-                  checked
-                    ? opt.isPositiveScreen ? "bg-red-50 border border-red-200" : "bg-cs-badge border border-cs-blue/20"
-                    : "hover:bg-cs-bg border border-transparent"
-                }`}>
+              <div key={opt.value} className="space-y-2">
+                <div className="flex items-center gap-1">
+                  <label className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors flex-1 ${
+                    checked
+                      ? opt.isPositiveScreen ? "bg-red-50 border border-red-200" : "bg-cs-badge border border-cs-blue/20"
+                      : "hover:bg-cs-bg border border-transparent"
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => onToggle(question.id, opt.value)}
+                      className="accent-cs-blue rounded"
+                    />
+                    <HighlightedText
+                      text={optText}
+                      localCharIndex={getHighlightPosition(optId, tts)}
+                      className={`font-body text-sm ${opt.isDecline ? "text-cs-text/40 italic" : "text-cs-text"}`}
+                    />
+                  </label>
+                  <SpeakerButton
+                    size="sm"
+                    isActive={tts.speakingId === optId}
+                    onClick={(e) => { e.preventDefault(); tts.speak(optId, optText, lang); }}
+                  />
+                </div>
+                {showOtherInput && onOtherText && (
                   <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => onToggle(question.id, opt.value)}
-                    className="accent-cs-blue rounded"
+                    type="text"
+                    value={otherText}
+                    onChange={(e) => onOtherText(question.id, e.target.value)}
+                    placeholder={t(opt.otherPlaceholder ?? "Please specify", opt.otherPlaceholderEs, lang)}
+                    aria-label={t(opt.otherPlaceholder ?? "Please specify", opt.otherPlaceholderEs, lang)}
+                    className="ml-9 w-[calc(100%-2.25rem)] px-3 py-2 rounded-md border border-cs-border bg-white font-body text-sm text-cs-text focus:outline-none focus:border-cs-blue"
                   />
-                  <HighlightedText
-                    text={optText}
-                    localCharIndex={getHighlightPosition(optId, tts)}
-                    className={`font-body text-sm ${opt.isDecline ? "text-cs-text/40 italic" : "text-cs-text"}`}
-                  />
-                </label>
-                <SpeakerButton
-                  size="sm"
-                  isActive={tts.speakingId === optId}
-                  onClick={(e) => { e.preventDefault(); tts.speak(optId, optText, lang); }}
-                />
+                )}
               </div>
             );
           })}

@@ -14,6 +14,10 @@ export interface PrapareOption {
   loinc?: string;
   isPositiveScreen?: boolean;
   isDecline?: boolean;
+  /** When true, selecting this option reveals an inline free-text input. Session-only; not persisted to the de-identified screening log. */
+  allowsOther?: boolean;
+  otherPlaceholder?: string;
+  otherPlaceholderEs?: string;
 }
 
 export interface PrapareQuestion {
@@ -69,7 +73,7 @@ export const QUESTIONS: PrapareQuestion[] = [
       { label: "Native Hawaiian", labelEs: "Nativo de Hawái", value: "nhpi" },
       { label: "Pacific Islander", labelEs: "Isleño del Pacífico", value: "pi" },
       { label: "White", labelEs: "Blanco/a", value: "white" },
-      { label: "Other", labelEs: "Otro", value: "other" },
+      { label: "Other", labelEs: "Otro", value: "other", allowsOther: true, otherPlaceholder: "Please specify", otherPlaceholderEs: "Por favor especifique" },
       { label: "I choose not to answer", labelEs: "Prefiero no contestar", value: "decline", isDecline: true },
     ],
   },
@@ -158,7 +162,7 @@ export const QUESTIONS: PrapareQuestion[] = [
       { label: "Child care", labelEs: "Cuidado de niños", value: "childcare", isPositiveScreen: true },
       { label: "Medicine or Any Health Care", labelEs: "Medicamentos o cualquier atención médica", value: "healthcare", isPositiveScreen: true },
       { label: "Phone", labelEs: "Teléfono", value: "phone", isPositiveScreen: true },
-      { label: "Other", labelEs: "Otro", value: "other", isPositiveScreen: true },
+      { label: "Other", labelEs: "Otro", value: "other", isPositiveScreen: true, allowsOther: true, otherPlaceholder: "Please specify", otherPlaceholderEs: "Por favor especifique" },
       { label: "I choose not to answer", labelEs: "Prefiero no contestar", value: "decline", isDecline: true },
     ],
   },
