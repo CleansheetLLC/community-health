@@ -1,0 +1,13 @@
+GEO_ID,NAME,total_population,poverty_count,poverty_rate,uninsured_count,uninsured_rate,hs_diploma_count,limited_english_count,limited_english_rate
+1400000US09003500100,"Census Tract 5001, Hartford County, Connecticut",3755,1368,0.364,82,0.022,612,302,0.080
+1400000US09003500200,"Census Tract 5002, Hartford County, Connecticut",1982,923,0.466,29,0.015,244,129,0.065
+1400000US09003500300,"Census Tract 5003, Hartford County, Connecticut",2105,1001,0.476,29,0.014,364,171,0.081
+1400000US09003504100,"Census Tract 5041, Hartford County, Connecticut",1581,700,0.443,0,0.000,200,188,0.119
+1400000US09003504200,"Census Tract 5042, Hartford County, Connecticut",5485,2609,0.476,79,0.014,1010,735,0.134
+1400000US09003504300,"Census Tract 5043, Hartford County, Connecticut",2168,522,0.241,21,0.010,470,181,0.084
+1400000US09003510100,"Census Tract 5101, Hartford County, Connecticut",1895,211,0.111,35,0.018,417,199,0.105
+1400000US09003497000,"Census Tract 4970, Hartford County, Connecticut",4443,105,0.024,37,0.008,294,689,0.155
+1400000US09003501700,"Census Tract 5017, Hartford County, Connecticut",1514,649,0.429,0,0.000,339,316,0.209
+1400000US09003501800,"Census Tract 5018, Hartford County, Connecticut",2729,1488,0.545,0,0.000,627,437,0.160
+1400000US09003490100,"Census Tract 4901, Hartford County, Connecticut",5756,215,0.037,68,0.012,1189,455,0.079
+1400000US09003487300,"Census Tract 4873, Hartford County, Connecticut",1500,207,0.138,0,0.000,185,105,0.070

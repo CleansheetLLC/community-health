@@ -7,6 +7,22 @@ import {
   sviColor, sviLabel,
   type SVIFeatureCollection, type SVITheme, type FacilityMarker, type SVIProperties,
 } from "./svi-data";
+import { getScreeningLog } from "./screening-log";
+
+type DataSource =
+  | { kind: "sample" }
+  | { kind: "svi"; filename: string }
+  | { kind: "acs"; filename: string; column: string }
+  | { kind: "screening"; entries: number; tracts: number };
+
+function dataSourceLabel(ds: DataSource): string {
+  switch (ds.kind) {
+    case "sample": return "Sample data (Franklin County, OH)";
+    case "svi": return `CDC SVI: ${ds.filename}`;
+    case "acs": return `Census ACS: ${ds.filename} (${ds.column})`;
+    case "screening": return `Screening Log (${ds.entries} entries, ${ds.tracts} tracts)`;
+  }
+}
 
 // ─── Facility icon colors ────────────────────────────────────────────────────
 
@@ -149,6 +165,12 @@ export default function SVIMapView() {
   const [selectedTract, setSelectedTract] = useState<SVIProperties | null>(null);
   const [showFacilities, setShowFacilities] = useState(true);
   const [facilities] = useState<FacilityMarker[]>(SAMPLE_FACILITIES);
+  const [dataSource, setDataSource] = useState<DataSource>({ kind: "sample" });
+  // Census ACS column picker state
+  const [acsColumns, setAcsColumns] = useState<string[]>([]);
+  const [acsSelectedColumn, setAcsSelectedColumn] = useState<string>("");
+  const [acsRawRows, setAcsRawRows] = useState<Record<string, string>[] | null>(null);
+  const [acsFilename, setAcsFilename] = useState("");
 
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<L.Map | null>(null);
@@ -289,13 +311,32 @@ export default function SVIMapView() {
     });
   }, []);
 
+  // Normalize a FIPS string: strip trailing decimals (.0, .00), strip
+  // GEO_ID prefixes (1400000US...), zero-pad to 11 digits. This handles
+  // CDC SVI float storage, Census ACS prefix, and Excel leading-zero loss.
+  const normalizeFips = useCallback((raw: string): string => {
+    let s = raw.trim()
+      .replace(/\.0+$/, "")           // "39049000100.00" → "39049000100"
+      .replace(/^1400000US/, "")       // Census ACS prefix
+      .replace(/^.*US/, "");           // Other Census prefixes
+    // Zero-pad to 11 digits if it looks like a short FIPS
+    if (/^\d+$/.test(s) && s.length < 11 && s.length >= 5) {
+      s = s.padStart(11, "0");
+    }
+    return s;
+  }, []);
+
   // Fetch Census tract boundaries from TIGERweb and join with SVI CSV data
   const loadCSVWithBoundaries = useCallback(async (rows: Record<string, string>[]) => {
     // Find the state FIPS from the data
     const fipsCol = Object.keys(rows[0]).find((k) => k.toUpperCase() === "FIPS") || "";
     const stCol = Object.keys(rows[0]).find((k) => k.toUpperCase() === "ST") || "";
-    const stateFips = rows[0][stCol] || (rows[0][fipsCol] || "").slice(0, 2);
-    if (!stateFips || stateFips.length !== 2) {
+
+    // Determine state from ST column or first 2 digits of normalized FIPS
+    const firstFips = normalizeFips(rows[0][fipsCol] || "");
+    const rawSt = rows[0][stCol] || "";
+    const stateFips = rawSt.padStart(2, "0").slice(0, 2) || firstFips.slice(0, 2);
+    if (!stateFips || !/^\d{2}$/.test(stateFips)) {
       setLoadStatus("Could not determine state FIPS code from CSV. Expected an ST or FIPS column.");
       return;
     }
@@ -303,11 +344,11 @@ export default function SVIMapView() {
     const stateName = rows[0][Object.keys(rows[0]).find((k) => k.toUpperCase() === "STATE") || ""] || `State ${stateFips}`;
     setLoadStatus(`Loading tract boundaries for ${stateName}...`);
 
-    // Build a lookup from FIPS → SVI row
+    // Build a lookup from normalized FIPS → SVI row
     const sviByFips: Record<string, Record<string, string>> = {};
     for (const row of rows) {
-      const fips = row[fipsCol];
-      if (fips) sviByFips[fips] = row;
+      const fips = normalizeFips(row[fipsCol]);
+      if (fips && fips.length === 11) sviByFips[fips] = row;
     }
 
     // Fetch boundaries from Census TIGERweb (paginated, 2000 per request)
@@ -359,7 +400,11 @@ export default function SVIMapView() {
     let matched = 0;
     const joinedFeatures = allFeatures
       .map((feature) => {
-        const geoid = feature.properties?.GEOID || "";
+        const rawGeoid = feature.properties?.GEOID || "";
+        // TIGERweb Census 2020 layer 8 returns block-group GEOIDs (12 digits).
+        // Truncate to 11 digits (tract level) for the join. Block groups within
+        // the same tract will share the parent tract's data values.
+        const geoid = rawGeoid.length === 12 ? rawGeoid.slice(0, 11) : rawGeoid;
         const svi = sviByFips[geoid];
         if (!svi) return null;
         matched++;
@@ -383,7 +428,13 @@ export default function SVIMapView() {
       .filter(Boolean) as SVIFeatureCollection["features"];
 
     if (matched === 0) {
-      setLoadStatus(`Loaded ${allFeatures.length} tract boundaries but matched 0 SVI rows. Check that your CSV has a FIPS column matching Census GEOID format (e.g., 39049000100).`);
+      const sampleCsvFips = Object.keys(sviByFips).slice(0, 3).join(", ") || "(none)";
+      const sampleGeoId = allFeatures.slice(0, 3).map((f) => f.properties?.GEOID).join(", ") || "(none)";
+      setLoadStatus(
+        `Loaded ${allFeatures.length} tract boundaries but matched 0 rows. ` +
+        `CSV FIPS samples: [${sampleCsvFips}]. TIGERweb GEOID samples: [${sampleGeoId}]. ` +
+        `Both should be 11-digit strings (e.g., 39049000100). If your CSV stores FIPS as a number, Excel may have stripped leading zeros.`
+      );
       return;
     }
 
@@ -391,6 +442,100 @@ export default function SVIMapView() {
     setSelectedTract(null);
     setLoadStatus(`Loaded ${matched} tracts (${allFeatures.length} boundaries, ${rows.length} CSV rows)`);
   }, []);
+
+  // ─── Load from screening log ──────────────────────────────────────────────
+  const loadFromScreeningLog = useCallback(() => {
+    const log = getScreeningLog();
+    const tractEntries = log.filter((e) => e.censusTract);
+    if (tractEntries.length === 0) {
+      setLoadStatus("No tract-tagged screening entries found. Run a screening with location tagging enabled first.");
+      return;
+    }
+
+    // Group by tract
+    const byTract = new Map<string, typeof tractEntries>();
+    for (const entry of tractEntries) {
+      const fips = entry.censusTract!;
+      const arr = byTract.get(fips) || [];
+      arr.push(entry);
+      byTract.set(fips, arr);
+    }
+
+    // Build synthetic CSV-like rows
+    const rows: Record<string, string>[] = [];
+    for (const [fips, entries] of byTract) {
+      const high = entries.filter((e) => e.overallRisk === "High").length;
+      const mod = entries.filter((e) => ["Moderate", "Medium"].includes(e.overallRisk)).length;
+      const riskRatio = entries.length > 0 ? high / entries.length : 0;
+      rows.push({
+        FIPS: fips,
+        ST: fips.slice(0, 2),
+        STATE: entries[0].state || "",
+        COUNTY: entries[0].county || "",
+        LOCATION: `Tract ${fips.slice(5)} (${entries.length} screenings)`,
+        E_TOTPOP: String(entries.length),
+        RPL_THEMES: riskRatio.toFixed(4),
+        RPL_THEME1: riskRatio.toFixed(4),
+        RPL_THEME2: String(mod / entries.length),
+        RPL_THEME3: "0",
+        RPL_THEME4: "0",
+        F_TOTAL: String(high + mod),
+      });
+    }
+
+    setDataSource({ kind: "screening", entries: tractEntries.length, tracts: byTract.size });
+    setAcsColumns([]);
+    setAcsRawRows(null);
+    setLoadStatus(`Loading ${byTract.size} tracts from ${tractEntries.length} screening entries...`);
+    loadCSVWithBoundaries(rows);
+  }, [loadCSVWithBoundaries]);
+
+  // ─── ACS normalization helper ──────────────────────────────────────────────
+  const loadAcsColumn = useCallback((rows: Record<string, string>[], column: string, filename: string) => {
+    // Find FIPS from GEO_ID / GEOID column, strip prefix
+    const geoCol = Object.keys(rows[0]).find((k) => k.replace(/_/g, "").toUpperCase() === "GEOID")
+      || Object.keys(rows[0]).find((k) => k.toUpperCase() === "GEO_ID") || "";
+
+    // Parse values, compute min/max for normalization.
+    // Census ACS CSVs from data.census.gov often have a description row
+    // as the first data row (e.g., "Estimate!!Total:!!Population...").
+    // Skip rows where the GEO_ID value doesn't look like a FIPS after normalization.
+    const parsed: { fips: string; st: string; value: number; row: Record<string, string> }[] = [];
+    let min = Infinity, max = -Infinity;
+    for (const row of rows) {
+      const rawGeo = row[geoCol] || "";
+      const fips = normalizeFips(rawGeo);
+      if (!fips || !/^\d{11}$/.test(fips)) continue; // skip description rows and garbage
+      const v = parseFloat(row[column]);
+      if (isNaN(v)) continue;
+      if (v < min) min = v;
+      if (v > max) max = v;
+      parsed.push({ fips, st: fips.slice(0, 2), value: v, row });
+    }
+
+    if (parsed.length === 0) {
+      setLoadStatus(`No valid numeric values found in column "${column}".`);
+      return;
+    }
+
+    const range = max - min || 1;
+    const syntheticRows: Record<string, string>[] = parsed.map((p) => ({
+      FIPS: p.fips,
+      ST: p.st,
+      STATE: p.row["NAME"] || p.row["name"] || "",
+      COUNTY: "",
+      LOCATION: `Tract ${p.fips.slice(5)}`,
+      E_TOTPOP: p.row["E_TOTPOP"] || p.row["B01001_001E"] || "0",
+      RPL_THEMES: ((p.value - min) / range).toFixed(6),
+      RPL_THEME1: ((p.value - min) / range).toFixed(6),
+      RPL_THEME2: "0", RPL_THEME3: "0", RPL_THEME4: "0",
+      F_TOTAL: "0",
+    }));
+
+    setDataSource({ kind: "acs", filename, column });
+    setLoadStatus(`Loading ${syntheticRows.length} tracts for "${column}"...`);
+    loadCSVWithBoundaries(syntheticRows);
+  }, [loadCSVWithBoundaries]);
 
   // Handle file upload (CSV or GeoJSON)
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -424,21 +569,71 @@ export default function SVIMapView() {
 
       // Check for expected SVI columns
       const headers = Object.keys(rows[0]).map((h) => h.toUpperCase());
-      if (!headers.includes("FIPS") && !headers.includes("ST")) {
-        setLoadStatus("CSV does not appear to be SVI data. Expected FIPS and ST columns.");
+      if (headers.includes("FIPS") || headers.includes("ST")) {
+        // CDC SVI format
+        setDataSource({ kind: "svi", filename: file.name });
+        setAcsColumns([]);
+        setAcsRawRows(null);
+        loadCSVWithBoundaries(rows);
         return;
       }
 
-      loadCSVWithBoundaries(rows);
+      // Census ACS format: look for GEO_ID / GEOID column
+      const geoCol = Object.keys(rows[0]).find((k) => k.replace(/_/g, "").toUpperCase() === "GEOID")
+        || Object.keys(rows[0]).find((k) => k.toUpperCase() === "GEO_ID");
+      if (geoCol) {
+        // Skip the Census description row (first data row where GEO_ID doesn't look like a FIPS)
+        const dataRows = rows.filter((r) => /^\d{11}$/.test(normalizeFips(r[geoCol] || "")));
+        if (dataRows.length === 0) {
+          setLoadStatus("Census CSV detected but no valid tract-level GEO_ID values found after stripping prefixes.");
+          return;
+        }
+
+        // Identify numeric columns (exclude ID / name columns)
+        const skipPatterns = /^(geo_?id|geoid|name|state|county|fips|st|sumlev|geocomp|region|division)$/i;
+        const numericCols = Object.keys(dataRows[0]).filter((col) => {
+          if (skipPatterns.test(col)) return false;
+          // Check first few non-empty rows for numeric values
+          const sample = dataRows.slice(0, 10).map((r) => r[col]).filter(Boolean);
+          return sample.length > 0 && sample.every((v) => !isNaN(parseFloat(v)));
+        });
+
+        if (numericCols.length === 0) {
+          setLoadStatus("Census CSV detected (found GEO_ID column) but no numeric data columns found.");
+          return;
+        }
+
+        // Store filtered data rows (description row stripped) for the column picker
+        setAcsColumns(numericCols);
+        setAcsRawRows(dataRows);
+        setAcsFilename(file.name);
+        setAcsSelectedColumn(numericCols[0]);
+        // Auto-load first column
+        loadAcsColumn(dataRows, numericCols[0], file.name);
+        return;
+      }
+
+      setLoadStatus("CSV format not recognized. Expected CDC SVI columns (FIPS, ST, RPL_THEMES) or Census ACS columns (GEO_ID + data).");
     };
     reader.readAsText(file);
-  }, [parseCSV, loadCSVWithBoundaries]);
+  }, [parseCSV, loadCSVWithBoundaries, loadAcsColumn]);
 
   return (
     <div className="space-y-4">
       {/* Controls */}
       <div className="space-y-3">
-        <ThemeSelector active={activeTheme} onChange={setActiveTheme} />
+        {/* Theme selector — only meaningful for CDC SVI data */}
+        {dataSource.kind === "svi" || dataSource.kind === "sample" ? (
+          <ThemeSelector active={activeTheme} onChange={setActiveTheme} />
+        ) : null}
+
+        {/* Source badge */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-body text-[0.625rem] font-medium text-cs-text/50 uppercase tracking-wider">Source:</span>
+          <span className="font-body text-xs text-cs-text bg-cs-badge px-2 py-0.5 rounded">
+            {dataSourceLabel(dataSource)}
+          </span>
+        </div>
 
         <div className="flex items-center justify-between flex-wrap gap-3">
           <label className="flex items-center gap-2 cursor-pointer">
@@ -461,11 +656,43 @@ export default function SVIMapView() {
             )}
           </label>
 
-          <label className="font-body text-xs text-cs-blue hover:text-cs-blue-dark cursor-pointer font-medium">
-            Load SVI Data (CSV or GeoJSON)...
-            <input type="file" accept=".csv,.json,.geojson" onChange={handleFileUpload} className="hidden" />
-          </label>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={loadFromScreeningLog}
+              className="font-body text-xs text-cs-blue hover:text-cs-blue-dark font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled={getScreeningLog().filter((e) => e.censusTract).length === 0}
+              title="Load tract-tagged screening results from the screening log"
+            >
+              Load from Screening Log
+            </button>
+            <label className="font-body text-xs text-cs-blue hover:text-cs-blue-dark cursor-pointer font-medium">
+              Load CSV / GeoJSON...
+              <input type="file" accept=".csv,.json,.geojson" onChange={handleFileUpload} className="hidden" />
+            </label>
+          </div>
         </div>
+
+        {/* Census ACS column picker */}
+        {acsColumns.length > 0 && acsRawRows && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-body text-xs text-cs-text/60">Visualize column:</span>
+            <select
+              value={acsSelectedColumn}
+              onChange={(e) => {
+                setAcsSelectedColumn(e.target.value);
+                loadAcsColumn(acsRawRows, e.target.value, acsFilename);
+              }}
+              className="font-mono text-xs px-2 py-1 rounded border border-cs-border bg-white text-cs-text focus:outline-none focus:border-cs-blue"
+            >
+              {acsColumns.map((col) => (
+                <option key={col} value={col}>{col}</option>
+              ))}
+            </select>
+            <span className="font-body text-[10px] text-cs-text/40">
+              ({acsColumns.length} numeric columns available)
+            </span>
+          </div>
+        )}
 
         {loadStatus && (
           <div className={`rounded-md px-3 py-2 font-body text-xs ${
@@ -505,29 +732,34 @@ export default function SVIMapView() {
       {/* Data source notice */}
       <div className="rounded-lg bg-cs-bg p-4 space-y-3">
         <p className="font-body text-xs text-cs-text/50">
-          <strong className="text-cs-text/70">Data:</strong> Showing sample data (8 tracts, Franklin County, OH).
-          To load real SVI data:
+          <strong className="text-cs-text/70">Data:</strong> {dataSourceLabel(dataSource)}.
         </p>
-        <ol className="font-body text-xs text-cs-text/50 list-decimal list-inside space-y-1">
-          <li>
-            Go to the{" "}
-            <a
-              href="https://www.atsdr.cdc.gov/place-health/php/svi/svi-interactive-map.html"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-cs-blue hover:underline"
-            >
-              CDC SVI Interactive Map
-            </a>
-            , filter by state/county, and download as CSV
-          </li>
-          <li>Click "Load SVI Data" above and select the downloaded CSV file</li>
-          <li>Tract boundaries are fetched automatically from the Census Bureau and joined with your SVI data</li>
-        </ol>
+        <div className="font-body text-xs text-cs-text/50 space-y-2">
+          <p className="font-medium text-cs-text/60">Load data from any of these sources:</p>
+          <ol className="list-decimal list-inside space-y-1">
+            <li>
+              <strong>Screening log</strong> — click "Load from Screening Log" above to visualize tract-tagged PRAPARE / AHC-HRSN screenings on the map.
+            </li>
+            <li>
+              <strong>CDC SVI</strong> — go to the{" "}
+              <a href="https://www.atsdr.cdc.gov/place-health/php/svi/svi-interactive-map.html" target="_blank" rel="noopener noreferrer" className="text-cs-blue hover:underline">
+                CDC SVI Interactive Map
+              </a>
+              , filter by state/county, download as CSV, then click "Load CSV / GeoJSON" above.
+            </li>
+            <li>
+              <strong>Census ACS</strong> — go to{" "}
+              <a href="https://data.census.gov" target="_blank" rel="noopener noreferrer" className="text-cs-blue hover:underline">
+                data.census.gov
+              </a>
+              , search by topic (poverty, insurance, education), filter to tract-level geography, download CSV. Upload here and pick which column to visualize.
+            </li>
+          </ol>
+        </div>
         <p className="font-body text-xs text-cs-text/50">
-          Also accepts GeoJSON files with SVI properties pre-joined. CSV files need <code className="font-mono text-[10px] bg-cs-border/30 px-1 rounded">FIPS</code>,{" "}
-          <code className="font-mono text-[10px] bg-cs-border/30 px-1 rounded">ST</code>, and{" "}
-          <code className="font-mono text-[10px] bg-cs-border/30 px-1 rounded">RPL_THEMES</code> columns (standard CDC SVI format).
+          Accepted formats: CDC SVI CSV (<code className="font-mono text-[10px] bg-cs-border/30 px-1 rounded">FIPS</code> + <code className="font-mono text-[10px] bg-cs-border/30 px-1 rounded">RPL_THEMES</code>),
+          Census ACS CSV (<code className="font-mono text-[10px] bg-cs-border/30 px-1 rounded">GEO_ID</code> + numeric columns),
+          GeoJSON with SVI properties, or directly from your screening log.
         </p>
         <p className="font-body text-xs text-cs-text/50">
           <strong className="text-cs-text/70">Privacy:</strong> Your CSV is parsed in the browser. Tract boundaries are

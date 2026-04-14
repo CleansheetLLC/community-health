@@ -1753,7 +1753,7 @@ export default function App() {
                 { id: "about" as const, label: "About" },
                 { id: "prapare" as const, label: "PRAPARE" },
                 { id: "ahc-hrsn" as const, label: "AHC-HRSN" },
-                // { id: "svi-map" as const, label: "SVI Map" }, // hidden pending data pipeline
+                { id: "svi-map" as const, label: "SVI Map" },
                 { id: "zcodes" as const, label: "Z Codes" },
                 { id: "log" as const, label: "Log" },
               ].map((tab) => (
@@ -1837,20 +1837,18 @@ export default function App() {
                     Z code mapping. Suitable for universal screening at intake.
                   </p>
                 </button>
-                {/* SVI Map card hidden pending data pipeline research
                 <button
                   onClick={() => navigate("svi-map")}
                   className="border border-cs-text/10 rounded-lg p-6 text-left hover:border-cs-blue/30 transition-colors"
                 >
                   <h3 className="font-heading text-lg text-cs-text mb-1">
-                    CDC SVI Map
+                    SVI Map
                   </h3>
                   <p className="font-body text-sm text-cs-text/60 leading-relaxed">
-                    Interactive Social Vulnerability Index map at census tract level.
-                    Four themes, facility overlay, upload your own data.
+                    Census tract vulnerability map. Load CDC SVI data, Census ACS tables,
+                    or visualize tract-tagged screening results directly from the log.
                   </p>
                 </button>
-                */}
                 <button
                   onClick={() => navigate("zcodes")}
                   className="border border-cs-text/10 rounded-lg p-6 text-left hover:border-cs-blue/30 transition-colors"
