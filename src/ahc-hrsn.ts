@@ -2,17 +2,41 @@
 // Source: CMS Accountable Health Communities Health-Related Social Needs Screening Tool
 // LOINC Panel: 96777-8
 // Public domain (CMS-developed instrument)
+//
+// ─── Spec fidelity notes ─────────────────────────────────────────────────────
+// This file implements the CMS AHC-HRSN 10-item core screener.
+//
+// Interpersonal-safety items (ahc7–ahc10) use the HITS (Hurt/Insult/Threaten/
+// Scream) subscale. Per published HITS scoring, each item scores 1–5 and the
+// subscale is positive when the four-item sum reaches a threshold (HITS_THRESHOLD).
+// Individual low-frequency responses ("Rarely" / "Sometimes" on a single item)
+// are NOT positive screens by themselves. Higher-frequency responses
+// ("Fairly often" / "Frequently") on any single item are flagged individually
+// because any one of them warrants clinical attention.
+//
+// Supplemental AHC-HRSN items (financial strain, employment, family support,
+// education, physical activity, substance use, mental health, disabilities)
+// are intentionally not implemented here. Implementations typically select a
+// subset of supplemental items per facility need.
 
 import type { Lang } from "./prapare";
 
 export type AhcQuestionType = "radio" | "checkbox";
+
+/** HITS positive-screen threshold. Sum across ahc7–ahc10 >= this value = positive. */
+export const HITS_THRESHOLD = 10;
 
 export interface AhcOption {
   label: string;
   labelEs?: string;
   value: string;
   loinc?: string;
+  /** Counts into CMS AHC-HRSN positive-screen composite per published scoring. */
   isPositiveScreen?: boolean;
+  /** Cleansheet-specific flag that deviates from strict CMS scoring. */
+  isExtension?: boolean;
+  /** HITS subscale item score (1–5). Only set on ahc7–ahc10 options. */
+  hitsScore?: number;
 }
 
 export interface AhcQuestion {
@@ -175,6 +199,14 @@ export const AHC_QUESTIONS: AhcQuestion[] = [
   },
 
   // Domain: Interpersonal Safety (HITS tool - Hurt, Insult, Threaten, Scream)
+  // ── HITS subscale (ahc7–ahc10) ──
+  // Per published HITS scoring:
+  //   Never = 1, Rarely = 2, Sometimes = 3, Fairly often = 4, Frequently = 5
+  //   Positive screen when total across the four items >= HITS_THRESHOLD (10).
+  // Individual items at "Fairly often" or "Frequently" are marked
+  // isPositiveScreen in addition, because any single such response warrants
+  // clinical attention on its own. Lower-frequency single responses rely on
+  // the composite threshold (see computeHitsComposite below).
   {
     id: "ahc7",
     domain: "safety",
@@ -183,11 +215,11 @@ export const AHC_QUESTIONS: AhcQuestion[] = [
     textEs: "¿Con qué frecuencia alguien, incluyendo familiares y amigos, le hace daño físicamente?",
     type: "radio",
     options: [
-      { label: "Never", labelEs: "Nunca", value: "never", loinc: "LA6270-8" },
-      { label: "Rarely", labelEs: "Raramente", value: "rarely", loinc: "LA10066-1", isPositiveScreen: true },
-      { label: "Sometimes", labelEs: "A veces", value: "sometimes", loinc: "LA10082-8", isPositiveScreen: true },
-      { label: "Fairly often", labelEs: "Con bastante frecuencia", value: "fairly-often", loinc: "LA10044-8", isPositiveScreen: true },
-      { label: "Frequently", labelEs: "Frecuentemente", value: "frequently", loinc: "LA6482-9", isPositiveScreen: true },
+      { label: "Never", labelEs: "Nunca", value: "never", loinc: "LA6270-8", hitsScore: 1 },
+      { label: "Rarely", labelEs: "Raramente", value: "rarely", loinc: "LA10066-1", hitsScore: 2 },
+      { label: "Sometimes", labelEs: "A veces", value: "sometimes", loinc: "LA10082-8", hitsScore: 3 },
+      { label: "Fairly often", labelEs: "Con bastante frecuencia", value: "fairly-often", loinc: "LA10044-8", hitsScore: 4, isPositiveScreen: true },
+      { label: "Frequently", labelEs: "Frecuentemente", value: "frequently", loinc: "LA6482-9", hitsScore: 5, isPositiveScreen: true },
     ],
   },
   {
@@ -198,11 +230,11 @@ export const AHC_QUESTIONS: AhcQuestion[] = [
     textEs: "¿Con qué frecuencia alguien, incluyendo familiares y amigos, le insulta o le habla con desprecio?",
     type: "radio",
     options: [
-      { label: "Never", labelEs: "Nunca", value: "never", loinc: "LA6270-8" },
-      { label: "Rarely", labelEs: "Raramente", value: "rarely", loinc: "LA10066-1", isPositiveScreen: true },
-      { label: "Sometimes", labelEs: "A veces", value: "sometimes", loinc: "LA10082-8", isPositiveScreen: true },
-      { label: "Fairly often", labelEs: "Con bastante frecuencia", value: "fairly-often", loinc: "LA10044-8", isPositiveScreen: true },
-      { label: "Frequently", labelEs: "Frecuentemente", value: "frequently", loinc: "LA6482-9", isPositiveScreen: true },
+      { label: "Never", labelEs: "Nunca", value: "never", loinc: "LA6270-8", hitsScore: 1 },
+      { label: "Rarely", labelEs: "Raramente", value: "rarely", loinc: "LA10066-1", hitsScore: 2 },
+      { label: "Sometimes", labelEs: "A veces", value: "sometimes", loinc: "LA10082-8", hitsScore: 3 },
+      { label: "Fairly often", labelEs: "Con bastante frecuencia", value: "fairly-often", loinc: "LA10044-8", hitsScore: 4, isPositiveScreen: true },
+      { label: "Frequently", labelEs: "Frecuentemente", value: "frequently", loinc: "LA6482-9", hitsScore: 5, isPositiveScreen: true },
     ],
   },
   {
@@ -213,11 +245,11 @@ export const AHC_QUESTIONS: AhcQuestion[] = [
     textEs: "¿Con qué frecuencia alguien, incluyendo familiares y amigos, le amenaza con hacerle daño?",
     type: "radio",
     options: [
-      { label: "Never", labelEs: "Nunca", value: "never", loinc: "LA6270-8" },
-      { label: "Rarely", labelEs: "Raramente", value: "rarely", loinc: "LA10066-1", isPositiveScreen: true },
-      { label: "Sometimes", labelEs: "A veces", value: "sometimes", loinc: "LA10082-8", isPositiveScreen: true },
-      { label: "Fairly often", labelEs: "Con bastante frecuencia", value: "fairly-often", loinc: "LA10044-8", isPositiveScreen: true },
-      { label: "Frequently", labelEs: "Frecuentemente", value: "frequently", loinc: "LA6482-9", isPositiveScreen: true },
+      { label: "Never", labelEs: "Nunca", value: "never", loinc: "LA6270-8", hitsScore: 1 },
+      { label: "Rarely", labelEs: "Raramente", value: "rarely", loinc: "LA10066-1", hitsScore: 2 },
+      { label: "Sometimes", labelEs: "A veces", value: "sometimes", loinc: "LA10082-8", hitsScore: 3 },
+      { label: "Fairly often", labelEs: "Con bastante frecuencia", value: "fairly-often", loinc: "LA10044-8", hitsScore: 4, isPositiveScreen: true },
+      { label: "Frequently", labelEs: "Frecuentemente", value: "frequently", loinc: "LA6482-9", hitsScore: 5, isPositiveScreen: true },
     ],
   },
   {
@@ -228,14 +260,47 @@ export const AHC_QUESTIONS: AhcQuestion[] = [
     textEs: "¿Con qué frecuencia alguien, incluyendo familiares y amigos, le grita o le maldice?",
     type: "radio",
     options: [
-      { label: "Never", labelEs: "Nunca", value: "never", loinc: "LA6270-8" },
-      { label: "Rarely", labelEs: "Raramente", value: "rarely", loinc: "LA10066-1", isPositiveScreen: true },
-      { label: "Sometimes", labelEs: "A veces", value: "sometimes", loinc: "LA10082-8", isPositiveScreen: true },
-      { label: "Fairly often", labelEs: "Con bastante frecuencia", value: "fairly-often", loinc: "LA10044-8", isPositiveScreen: true },
-      { label: "Frequently", labelEs: "Frecuentemente", value: "frequently", loinc: "LA6482-9", isPositiveScreen: true },
+      { label: "Never", labelEs: "Nunca", value: "never", loinc: "LA6270-8", hitsScore: 1 },
+      { label: "Rarely", labelEs: "Raramente", value: "rarely", loinc: "LA10066-1", hitsScore: 2 },
+      { label: "Sometimes", labelEs: "A veces", value: "sometimes", loinc: "LA10082-8", hitsScore: 3 },
+      { label: "Fairly often", labelEs: "Con bastante frecuencia", value: "fairly-often", loinc: "LA10044-8", hitsScore: 4, isPositiveScreen: true },
+      { label: "Frequently", labelEs: "Frecuentemente", value: "frequently", loinc: "LA6482-9", hitsScore: 5, isPositiveScreen: true },
     ],
   },
 ];
+
+// ─── HITS composite scoring ──────────────────────────────────────────────────
+// Sums HITS scores across ahc7–ahc10 and returns the composite state.
+// Input: answers keyed by question id with radio values (strings).
+export const HITS_QUESTION_IDS = ["ahc7", "ahc8", "ahc9", "ahc10"] as const;
+
+export interface HitsComposite {
+  /** Sum of hitsScore values across the four HITS items. 4 (all "Never") to 20 (all "Frequently"). */
+  total: number;
+  /** True when total >= HITS_THRESHOLD. */
+  positive: boolean;
+  /** Per-item scores (undefined if the question wasn't answered). */
+  perItem: Record<string, number | undefined>;
+}
+
+export function computeHitsComposite(
+  answers: Record<string, string | string[] | number | undefined>
+): HitsComposite {
+  const perItem: Record<string, number | undefined> = {};
+  let total = 0;
+  for (const qId of HITS_QUESTION_IDS) {
+    const ans = answers[qId];
+    if (typeof ans !== "string") {
+      perItem[qId] = undefined;
+      continue;
+    }
+    const q = AHC_QUESTIONS.find((x) => x.id === qId);
+    const score = q?.options.find((o) => o.value === ans)?.hitsScore;
+    perItem[qId] = score;
+    if (typeof score === "number") total += score;
+  }
+  return { total, positive: total >= HITS_THRESHOLD, perItem };
+}
 
 // ─── Z Code Mapping (per positive screen domain) ─────────────────────────────
 
@@ -351,12 +416,13 @@ export const AHC_ANSWER_Z_CODES: Record<string, Record<string, AhcAnswerZCode[]>
     ],
   },
   // ── ahc7-ahc10: Interpersonal safety (HITS subscale) ──
-  // Any positive response warrants clinical attention. At higher frequencies ("Fairly often",
-  // "Frequently") we add a second code to reflect the more sustained pattern.
+  // Per-answer Z codes apply only when a single item's response is itself a
+  // positive screen (Fairly often / Frequently). Composite positive screens
+  // (HITS total >= 10 from combinations of lower-frequency responses) are
+  // handled at the aggregation layer, which emits the HITS composite Z codes
+  // separately via getHitsCompositeZCodes().
   // ahc7: physical hurt
   ahc7: {
-    rarely: [{ code: "Z65.4", description: "Victim of crime and terrorism" }],
-    sometimes: [{ code: "Z65.4", description: "Victim of crime and terrorism" }],
     "fairly-often": [
       { code: "Z65.4", description: "Victim of crime and terrorism" },
       { code: "Z63.0", description: "Problems in relationship with spouse or partner" },
@@ -368,15 +434,11 @@ export const AHC_ANSWER_Z_CODES: Record<string, Record<string, AhcAnswerZCode[]>
   },
   // ahc8: insult/talk down (emotional abuse indicator)
   ahc8: {
-    rarely: [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
-    sometimes: [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
     "fairly-often": [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
     frequently: [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
   },
   // ahc9: threaten with harm
   ahc9: {
-    rarely: [{ code: "Z65.4", description: "Victim of crime and terrorism" }],
-    sometimes: [{ code: "Z65.4", description: "Victim of crime and terrorism" }],
     "fairly-often": [
       { code: "Z65.4", description: "Victim of crime and terrorism" },
       { code: "Z63.0", description: "Problems in relationship with spouse or partner" },
@@ -388,12 +450,19 @@ export const AHC_ANSWER_Z_CODES: Record<string, Record<string, AhcAnswerZCode[]>
   },
   // ahc10: scream/curse (verbal abuse indicator)
   ahc10: {
-    rarely: [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
-    sometimes: [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
     "fairly-often": [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
     frequently: [{ code: "Z63.8", description: "Other specified problems related to primary support group" }],
   },
 };
+
+// Z codes emitted when the HITS composite is positive (total >= HITS_THRESHOLD)
+// but no individual item is a per-item positive screen.
+export function getHitsCompositeZCodes(): AhcAnswerZCode[] {
+  return [
+    { code: "Z63.8", description: "Other specified problems related to primary support group" },
+    { code: "Z65.4", description: "Victim of crime and terrorism" },
+  ];
+}
 
 // Get Z codes for a specific question+answer. For checkbox questions, pass the
 // answer array; for radio, pass the single value. Returns empty array if no

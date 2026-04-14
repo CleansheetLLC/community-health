@@ -2,6 +2,34 @@
 // Source: National Association of Community Health Centers (NACHC)
 // LOINC Panel: 93025-5
 // Freely available, copyright NACHC 2019
+//
+// ─── Spec fidelity notes ─────────────────────────────────────────────────────
+// This file implements the published NACHC PRAPARE instrument. Question IDs
+// preserve NACHC numbering (q1–q21) even where items are not yet implemented,
+// so gaps are legible at a glance.
+//
+// Option flags are categorized as follows:
+//
+//   isPositiveScreen    — a response that counts into the social-risk composite
+//                         per NACHC published scoring.
+//   isExtension         — a Cleansheet-specific flag that is clinically
+//                         defensible but deviates from strict NACHC scoring
+//                         (typically over-flags toward caution).
+//   isCareDeliveryFlag  — triggers a care-accommodation action (interpreter
+//                         services, translated materials, specialty routing).
+//                         Does NOT contribute to social-risk scoring and does
+//                         NOT emit a Z code.
+//   isDecline           — "I choose not to answer" / refusal responses.
+//
+// Items intentionally not yet implemented:
+//   q9  — Address (optional demographic; often collected elsewhere in the EHR)
+//   q19 — Refugee status (optional supplemental)
+//
+// Items marked isExtension (not strict spec):
+//   q15 — Non-medical transportation as positive screen (NACHC primary is medical)
+//   q20 — "Unsure" safety response as positive screen (NACHC primary is "No")
+//   q13 — Income threshold for positive screen is implementation-defined;
+//         the threshold used here approximates 200% FPL for small households.
 
 export type QuestionType = "radio" | "checkbox" | "number" | "text";
 
@@ -12,7 +40,12 @@ export interface PrapareOption {
   labelEs?: string;
   value: string;
   loinc?: string;
+  /** Counts into NACHC social-risk composite. See header for fidelity rules. */
   isPositiveScreen?: boolean;
+  /** Cleansheet-specific flag that deviates from strict NACHC scoring. */
+  isExtension?: boolean;
+  /** Care-accommodation flag (interpreter services, specialty routing). Does NOT score or emit Z code. */
+  isCareDeliveryFlag?: boolean;
   isDecline?: boolean;
   /** When true, selecting this option reveals an inline free-text input. Session-only; not persisted to the de-identified screening log. */
   allowsOther?: boolean;
@@ -100,7 +133,10 @@ export const QUESTIONS: PrapareQuestion[] = [
     loinc: "54899-0", text: "What language are you most comfortable speaking?", textEs: "¿Qué idioma le resulta más cómodo hablar?", type: "radio",
     options: [
       { label: "English", labelEs: "Inglés", value: "english" },
-      { label: "Language other than English", labelEs: "Otro idioma que no sea inglés", value: "other", isPositiveScreen: true },
+      // Per NACHC scoring, language preference is a care-delivery accommodation
+      // flag (interpreter services, translated materials), not a social-risk
+      // positive screen. Does not contribute to risk level and does not emit a Z code.
+      { label: "Language other than English", labelEs: "Otro idioma que no sea inglés", value: "other", isCareDeliveryFlag: true },
       { label: "I choose not to answer", labelEs: "Prefiero no contestar", value: "decline", isDecline: true },
     ],
   },
@@ -153,6 +189,40 @@ export const QUESTIONS: PrapareQuestion[] = [
     ],
   },
   {
+    // NACHC core measure. Uninsured is a positive screen per Z59.71 / Z75.3.
+    id: "q12", domain: "money-resources", domainLabel: "Money and Resources", domainLabelEs: "Dinero y Recursos",
+    loinc: "76437-3", text: "What is your main insurance?", textEs: "¿Cuál es su seguro principal?", type: "radio",
+    options: [
+      { label: "None / uninsured", labelEs: "Ninguno / sin seguro", value: "none", isPositiveScreen: true },
+      { label: "Medicaid", labelEs: "Medicaid", value: "medicaid" },
+      { label: "CHIP Medicaid", labelEs: "Medicaid CHIP", value: "chip-medicaid" },
+      { label: "Medicare", labelEs: "Medicare", value: "medicare" },
+      { label: "Other public insurance (not CHIP)", labelEs: "Otro seguro público (no CHIP)", value: "other-public" },
+      { label: "Other public insurance (CHIP)", labelEs: "Otro seguro público (CHIP)", value: "other-public-chip" },
+      { label: "Private insurance", labelEs: "Seguro privado", value: "private" },
+      { label: "I choose not to answer", labelEs: "Prefiero no contestar", value: "decline", isDecline: true },
+    ],
+  },
+  {
+    // NACHC core measure. The specific income threshold for positive screen is
+    // implementation-defined. Here we flag < $25,000 as an approximation of
+    // ~200% FPL for a 1-2 person household. Marked isExtension because the
+    // threshold itself is not spec-literal.
+    id: "q13", domain: "money-resources", domainLabel: "Money and Resources", domainLabelEs: "Dinero y Recursos",
+    loinc: "63586-2", text: "During the past year, what was the total combined income for you and the family members you live with? This information will help us determine if you are eligible for any benefits.", textEs: "Durante el último año, ¿cuál fue el ingreso total combinado para usted y los miembros de su familia con quienes vive? Esta información nos ayudará a determinar si califica para algún beneficio.", type: "radio",
+    options: [
+      { label: "Less than $10,000", labelEs: "Menos de $10,000", value: "lt-10k", isPositiveScreen: true, isExtension: true },
+      { label: "$10,000 – $14,999", labelEs: "$10,000 – $14,999", value: "10-15k", isPositiveScreen: true, isExtension: true },
+      { label: "$15,000 – $24,999", labelEs: "$15,000 – $24,999", value: "15-25k", isPositiveScreen: true, isExtension: true },
+      { label: "$25,000 – $34,999", labelEs: "$25,000 – $34,999", value: "25-35k" },
+      { label: "$35,000 – $49,999", labelEs: "$35,000 – $49,999", value: "35-50k" },
+      { label: "$50,000 – $74,999", labelEs: "$50,000 – $74,999", value: "50-75k" },
+      { label: "$75,000 – $99,999", labelEs: "$75,000 – $99,999", value: "75-100k" },
+      { label: "$100,000 or more", labelEs: "$100,000 o más", value: "gte-100k" },
+      { label: "I choose not to answer", labelEs: "Prefiero no contestar", value: "decline", isDecline: true },
+    ],
+  },
+  {
     id: "q14", domain: "money-resources", domainLabel: "Money and Resources", domainLabelEs: "Dinero y Recursos",
     loinc: "93031-3", text: "In the past year, have you or any family members you live with been unable to get any of the following when it was really needed? (Check all that apply)", textEs: "¿En el último año, usted o algún miembro de su familia con quien vive no ha podido obtener alguna de las siguientes cosas cuando realmente la necesitaba? (Marque todas las que apliquen)", type: "checkbox",
     options: [
@@ -171,7 +241,9 @@ export const QUESTIONS: PrapareQuestion[] = [
     loinc: "93030-5", text: "Has lack of transportation kept you from medical appointments, meetings, work, or from getting things needed for daily living?", textEs: "¿La falta de transporte le ha impedido asistir a citas médicas, reuniones, trabajo o conseguir cosas necesarias para la vida diaria?", type: "checkbox",
     options: [
       { label: "Yes, it has kept me from medical appointments or from getting my medications", labelEs: "Sí, me ha impedido asistir a citas médicas o conseguir mis medicamentos", value: "medical", isPositiveScreen: true },
-      { label: "Yes, it has kept me from non-medical meetings, appointments, work, or from getting things that I need", labelEs: "Sí, me ha impedido asistir a reuniones, citas, trabajo o conseguir cosas que necesito", value: "non-medical", isPositiveScreen: true },
+      // Extension: strict NACHC scoring primary-flags the medical option; non-medical
+      // is also a barrier but counts into the composite in extended scoring only.
+      { label: "Yes, it has kept me from non-medical meetings, appointments, work, or from getting things that I need", labelEs: "Sí, me ha impedido asistir a reuniones, citas, trabajo o conseguir cosas que necesito", value: "non-medical", isPositiveScreen: true, isExtension: true },
       { label: "No", labelEs: "No", value: "no" },
     ],
   },
@@ -217,7 +289,22 @@ export const QUESTIONS: PrapareQuestion[] = [
     options: [
       { label: "Yes", labelEs: "Sí", value: "yes" },
       { label: "No", labelEs: "No", value: "no", isPositiveScreen: true },
-      { label: "Unsure", labelEs: "No estoy seguro/a", value: "unsure", isPositiveScreen: true },
+      // Extension: NACHC primary positive screen is "No". "Unsure" typically
+      // triggers clinical follow-up conversation but is not a positive screen
+      // in strict scoring.
+      { label: "Unsure", labelEs: "No estoy seguro/a", value: "unsure", isPositiveScreen: true, isExtension: true },
+      { label: "I choose not to answer", labelEs: "Prefiero no contestar", value: "decline", isDecline: true },
+    ],
+  },
+  {
+    // NACHC optional supplemental — intimate partner violence screen.
+    // Clinically significant; positive screen routes to safety planning + Z69.11.
+    id: "q21", domain: "optional", domainLabel: "Optional Supplemental", domainLabelEs: "Preguntas Opcionales",
+    loinc: "76499-3", text: "In the past year, have you been afraid of your partner or ex-partner?", textEs: "¿En el último año, ha tenido miedo de su pareja o ex-pareja?", type: "radio",
+    options: [
+      { label: "Yes", labelEs: "Sí", value: "yes", isPositiveScreen: true },
+      { label: "No", labelEs: "No", value: "no" },
+      { label: "I have not had a partner in the past year", labelEs: "No he tenido pareja en el último año", value: "no-partner" },
       { label: "I choose not to answer", labelEs: "Prefiero no contestar", value: "decline", isDecline: true },
     ],
   },
@@ -269,6 +356,18 @@ export const Z_CODE_MAPPINGS: ZCodeMapping[] = [
   { domain: "Healthcare access", trigger: "Unable to get medicine or healthcare", codes: [
     { code: "Z59.71", description: "Insufficient health insurance coverage" },
     { code: "Z75.3", description: "Unavailability and inaccessibility of health-care facilities" },
+  ]},
+  { domain: "Insurance", trigger: "Uninsured", codes: [
+    { code: "Z59.71", description: "Insufficient health insurance coverage" },
+    { code: "Z75.3", description: "Unavailability and inaccessibility of health-care facilities" },
+  ]},
+  { domain: "Financial strain", trigger: "Household income below approx. 200% FPL", codes: [
+    { code: "Z59.86", description: "Financial insecurity" },
+    { code: "Z59.7", description: "Insufficient social insurance and welfare support" },
+  ]},
+  { domain: "Intimate partner violence", trigger: "Afraid of partner or ex-partner", codes: [
+    { code: "Z69.11", description: "Encounter for mental health services for victim of spousal or partner violence" },
+    { code: "T74.11XA", description: "Adult physical abuse, confirmed, initial encounter" },
   ]},
 ];
 

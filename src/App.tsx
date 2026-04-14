@@ -5,6 +5,7 @@ import {
 } from "./prapare";
 import {
   AHC_QUESTIONS, AHC_DOMAINS, AHC_Z_CODE_MAPPINGS, getZCodesForAhcAnswer,
+  computeHitsComposite, getHitsCompositeZCodes, HITS_THRESHOLD,
   type AhcQuestion,
 } from "./ahc-hrsn";
 import SVIMapView from "./SVIMap";
@@ -317,7 +318,7 @@ function PrapareScreening() {
     [activeDomain],
   );
 
-  // Compute risk flags per domain
+  // Compute risk flags per domain (positive screens that count into risk level).
   const riskFlags = useMemo(() => {
     const flags: Record<string, string[]> = {};
     for (const q of QUESTIONS) {
@@ -341,6 +342,32 @@ function PrapareScreening() {
       }
     }
     return flags;
+  }, [answers]);
+
+  // Compute care-delivery flags — accommodations like interpreter services.
+  // These do NOT count into risk level and do NOT emit Z codes; they route
+  // into care coordination instead.
+  const careDeliveryFlags = useMemo(() => {
+    const items: { qId: string; label: string; labelEs?: string }[] = [];
+    for (const q of QUESTIONS) {
+      const answer = answers[q.id];
+      if (!answer || !q.options) continue;
+      if (q.type === "radio") {
+        const selected = q.options.find((o) => o.value === answer);
+        if (selected?.isCareDeliveryFlag) {
+          items.push({ qId: q.id, label: selected.label, labelEs: selected.labelEs });
+        }
+      }
+      if (q.type === "checkbox" && Array.isArray(answer)) {
+        for (const val of answer) {
+          const opt = q.options.find((o) => o.value === val);
+          if (opt?.isCareDeliveryFlag) {
+            items.push({ qId: q.id, label: opt.label, labelEs: opt.labelEs });
+          }
+        }
+      }
+    }
+    return items;
   }, [answers]);
 
   const totalFlags = Object.values(riskFlags).reduce((s, f) => s + f.length, 0);
@@ -579,6 +606,33 @@ function PrapareScreening() {
               </div>
             );
           })}
+
+          {/* Care-delivery accommodations (not risk factors) */}
+          {careDeliveryFlags.length > 0 && (
+            <div className="border rounded-lg p-5 border-blue-200 bg-blue-50">
+              <div className="flex items-center gap-2 mb-2">
+                <h4 className="font-heading text-base text-cs-text">
+                  {lang === "es" ? "Adaptaciones de Atención" : "Care Accommodations"}
+                </h4>
+                <span className="text-[0.5625rem] font-medium uppercase tracking-wider rounded bg-blue-100 text-blue-700 px-1.5 py-0.5">
+                  {lang === "es" ? "Sin impacto en nivel de riesgo" : "Does not affect risk level"}
+                </span>
+              </div>
+              <ul className="space-y-1">
+                {careDeliveryFlags.map((flag, i) => (
+                  <li key={i} className="font-body text-sm text-cs-text/80 flex items-start gap-2">
+                    <span className="text-blue-500 mt-0.5">&#9679;</span>
+                    {t(flag.label, flag.labelEs, lang)}
+                    {flag.qId === "q5" && (
+                      <span className="text-xs text-blue-600 ml-1">
+                        ({lang === "es" ? "servicios de interpretación recomendados" : "interpreter services recommended"})
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="border-t border-cs-border pt-6 flex gap-4">
             {!saved ? (
@@ -879,7 +933,7 @@ function AhcHrsnScreening() {
     [activeDomain],
   );
 
-  // Compute risk flags per domain
+  // Compute risk flags per domain (individual isPositiveScreen + HITS composite)
   const riskFlags = useMemo(() => {
     const flags: Record<string, string[]> = {};
     for (const q of AHC_QUESTIONS) {
@@ -902,6 +956,20 @@ function AhcHrsnScreening() {
         }
       }
     }
+
+    // HITS composite: if the four-item HITS total reaches the threshold,
+    // the safety domain is positive even if no single item scored
+    // "Fairly often" or "Frequently" individually.
+    const hits = computeHitsComposite(answers);
+    if (hits.positive && !(flags.safety?.length)) {
+      if (!flags.safety) flags.safety = [];
+      flags.safety.push(
+        lang === "es"
+          ? `Puntaje compuesto HITS: ${hits.total} (umbral ${HITS_THRESHOLD})`
+          : `HITS composite score: ${hits.total} (threshold ${HITS_THRESHOLD})`
+      );
+    }
+
     return flags;
   }, [answers, lang]);
 
@@ -931,6 +999,11 @@ function AhcHrsnScreening() {
     for (const q of AHC_QUESTIONS) {
       const codes = getZCodesForAhcAnswer(q.id, answers[q.id] as string | string[] | undefined);
       codes.forEach((c) => zCodeSet.add(c.code));
+    }
+    // HITS composite Z codes when the threshold is met
+    const hits = computeHitsComposite(answers);
+    if (hits.positive) {
+      getHitsCompositeZCodes().forEach((c) => zCodeSet.add(c.code));
     }
     const entry: ScreeningLogEntry = {
       id: crypto.randomUUID(),
