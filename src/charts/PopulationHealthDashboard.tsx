@@ -22,6 +22,9 @@ type DataSource =
 interface DashboardProps {
   data: SVIFeatureCollection;
   dataSource: DataSource;
+  /** For ACS sources: the raw parsed rows and numeric column names, enabling multi-column grouped bar charts. */
+  acsRawRows?: Record<string, string>[] | null;
+  acsColumns?: string[];
 }
 
 // ─── SVI / Sample charts ─────────────────────────────────────────────────────
@@ -131,7 +134,19 @@ function SviCharts({ features }: { features: SVIFeatureCollection["features"] })
 
 // ─── Census ACS charts ───────────────────────────────────────────────────────
 
-function AcsCharts({ features, column }: { features: SVIFeatureCollection["features"]; column: string }) {
+const ACS_SERIES_COLORS = ["#0066CC", "#dc2626", "#16a34a", "#d97706", "#7b3294", "#4575b4", "#fc8d59", "#91bfdb"];
+
+function AcsCharts({
+  features,
+  column,
+  rawRows,
+  columns,
+}: {
+  features: SVIFeatureCollection["features"];
+  column: string;
+  rawRows?: Record<string, string>[] | null;
+  columns?: string[];
+}) {
   const tracts = features.map((f) => f.properties).filter(Boolean) as SVIProperties[];
   const sorted = useMemo(
     () => [...tracts].filter((t) => t.RPL_THEMES >= 0).sort((a, b) => b.RPL_THEMES - a.RPL_THEMES),
@@ -146,25 +161,76 @@ function AcsCharts({ features, column }: { features: SVIFeatureCollection["featu
 
   // Population distribution donut
   const popDonut = useMemo(
-    () => sorted.slice(0, 12).map((t) => ({
+    () => sorted.slice(0, 12).map((t, i) => ({
       label: t.LOCATION || t.FIPS,
       value: Math.max(t.E_TOTPOP, 0),
-      color: `hsl(${210 + sorted.indexOf(t) * 12}, 60%, 55%)`,
+      color: `hsl(${210 + i * 12}, 60%, 55%)`,
     })),
     [sorted],
   );
 
+  const totalPop = tracts.reduce((s, t) => s + Math.max(t.E_TOTPOP, 0), 0);
+
+  // Grouped bar: compare multiple rate columns across tracts (from raw ACS rows)
+  const grouped = useMemo(() => {
+    if (!rawRows || !columns || columns.length < 2) return null;
+    // Pick rate columns (values 0-1 range) for grouped comparison — up to 6
+    const rateCols = columns.filter((col) => {
+      const vals = rawRows.slice(0, 5).map((r) => parseFloat(r[col])).filter((v) => !isNaN(v));
+      return vals.length > 0 && vals.every((v) => v >= 0 && v <= 1);
+    }).slice(0, 6);
+    if (rateCols.length < 2) return null;
+
+    // Find a name column for categories
+    const nameCol = Object.keys(rawRows[0]).find((k) => /name/i.test(k));
+
+    const categories = rawRows.slice(0, 12).map((r) => {
+      const name = nameCol ? r[nameCol] : "";
+      return name.length > 20 ? name.slice(0, 18) + ".." : name || "?";
+    });
+
+    const series = rateCols.map((col, i) => ({
+      label: col.replace(/_/g, " "),
+      color: ACS_SERIES_COLORS[i % ACS_SERIES_COLORS.length],
+      values: rawRows.slice(0, 12).map((r) => parseFloat(r[col]) || 0),
+    }));
+
+    return { categories, series };
+  }, [rawRows, columns]);
+
+  // Trend lines: rate columns across tracts (each tract is a point on x-axis)
+  const trendLines = useMemo(() => {
+    if (!rawRows || !columns || columns.length < 2) return null;
+    const rateCols = columns.filter((col) => {
+      const vals = rawRows.slice(0, 5).map((r) => parseFloat(r[col])).filter((v) => !isNaN(v));
+      return vals.length > 0 && vals.every((v) => v >= 0 && v <= 1);
+    }).slice(0, 5);
+    if (rateCols.length < 2) return null;
+
+    const nameCol = Object.keys(rawRows[0]).find((k) => /name/i.test(k));
+    return rateCols.map((col, i) => ({
+      label: col.replace(/_/g, " "),
+      color: ACS_SERIES_COLORS[i % ACS_SERIES_COLORS.length],
+      data: rawRows.map((r) => ({
+        x: nameCol ? (r[nameCol].length > 15 ? r[nameCol].slice(0, 13) + ".." : r[nameCol]) : "?",
+        y: parseFloat(r[col]) || 0,
+      })),
+    }));
+  }, [rawRows, columns]);
+
   return (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="border border-cs-border rounded-lg bg-white p-4">
-          <DonutChart
-            segments={popDonut}
-            title="Population by Tract"
-            centerValue={String(tracts.reduce((s, t) => s + Math.max(t.E_TOTPOP, 0), 0).toLocaleString())}
-            centerLabel="total pop."
-          />
-        </div>
+        {totalPop > 0 && (
+          <div className="border border-cs-border rounded-lg bg-white p-4">
+            <DonutChart
+              segments={popDonut}
+              title="Population by Tract"
+              centerValue={totalPop.toLocaleString()}
+              centerLabel="total pop."
+            />
+          </div>
+        )}
         <div className="border border-cs-border rounded-lg bg-white p-4">
           <HorizontalBarChart
             items={rankedTracts}
@@ -174,6 +240,27 @@ function AcsCharts({ features, column }: { features: SVIFeatureCollection["featu
           />
         </div>
       </div>
+      {grouped && (
+        <div className="border border-cs-border rounded-lg bg-white p-4">
+          <GroupedBarChart
+            categories={grouped.categories}
+            series={grouped.series}
+            title="Rate Metrics by Tract"
+            yLabel="Rate (0–1)"
+            formatValue={(v) => v.toFixed(2)}
+          />
+        </div>
+      )}
+      {trendLines && (
+        <div className="border border-cs-border rounded-lg bg-white p-4">
+          <TrendLineChart
+            series={trendLines}
+            title="Rate Comparison Across Tracts"
+            yLabel="Rate"
+            formatY={(v) => v.toFixed(2)}
+          />
+        </div>
+      )}
     </>
   );
 }
@@ -283,7 +370,7 @@ function ScreeningCharts({ features }: { features: SVIFeatureCollection["feature
 
 // ─── Main composer ───────────────────────────────────────────────────────────
 
-export default function PopulationHealthDashboard({ data, dataSource }: DashboardProps) {
+export default function PopulationHealthDashboard({ data, dataSource, acsRawRows, acsColumns }: DashboardProps) {
   if (!data.features || data.features.length === 0) return null;
 
   return (
@@ -295,7 +382,7 @@ export default function PopulationHealthDashboard({ data, dataSource }: Dashboar
         <SviCharts features={data.features} />
       )}
       {dataSource.kind === "acs" && (
-        <AcsCharts features={data.features} column={dataSource.column} />
+        <AcsCharts features={data.features} column={dataSource.column} rawRows={acsRawRows} columns={acsColumns} />
       )}
       {dataSource.kind === "screening" && (
         <ScreeningCharts features={data.features} />

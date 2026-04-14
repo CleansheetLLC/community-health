@@ -520,18 +520,36 @@ export default function SVIMapView() {
     }
 
     const range = max - min || 1;
-    const syntheticRows: Record<string, string>[] = parsed.map((p) => ({
-      FIPS: p.fips,
-      ST: p.st,
-      STATE: p.row["NAME"] || p.row["name"] || "",
-      COUNTY: "",
-      LOCATION: `Tract ${p.fips.slice(5)}`,
-      E_TOTPOP: p.row["E_TOTPOP"] || p.row["B01001_001E"] || "0",
-      RPL_THEMES: ((p.value - min) / range).toFixed(6),
-      RPL_THEME1: ((p.value - min) / range).toFixed(6),
-      RPL_THEME2: "0", RPL_THEME3: "0", RPL_THEME4: "0",
-      F_TOTAL: "0",
-    }));
+
+    // Find population column by common names
+    const popColNames = ["total_population", "E_TOTPOP", "B01003_001E", "B01001_001E", "population", "pop", "TOTPOP"];
+    const findCol = (row: Record<string, string>, candidates: string[]) => {
+      for (const c of candidates) {
+        const match = Object.keys(row).find((k) => k.toLowerCase() === c.toLowerCase());
+        if (match && row[match]) return row[match];
+      }
+      return "0";
+    };
+
+    // Find name/label column
+    const nameColNames = ["NAME", "name", "Name", "NAMELSAD", "tract_name", "label"];
+
+    const syntheticRows: Record<string, string>[] = parsed.map((p) => {
+      const popVal = findCol(p.row, popColNames);
+      const nameVal = findCol(p.row, nameColNames) || `Tract ${p.fips.slice(5)}`;
+      return {
+        FIPS: p.fips,
+        ST: p.st,
+        STATE: "",
+        COUNTY: "",
+        LOCATION: nameVal,
+        E_TOTPOP: popVal,
+        RPL_THEMES: ((p.value - min) / range).toFixed(6),
+        RPL_THEME1: ((p.value - min) / range).toFixed(6),
+        RPL_THEME2: "0", RPL_THEME3: "0", RPL_THEME4: "0",
+        F_TOTAL: "0",
+      };
+    });
 
     setDataSource({ kind: "acs", filename, column });
     setLoadStatus(`Loading ${syntheticRows.length} tracts for "${column}"...`);
@@ -731,7 +749,7 @@ export default function SVIMapView() {
       <StatsSummary data={data} />
 
       {/* Population health analytics charts */}
-      <PopulationHealthDashboard data={data} dataSource={dataSource} />
+      <PopulationHealthDashboard data={data} dataSource={dataSource} acsRawRows={acsRawRows} acsColumns={acsColumns} />
 
       {/* Data source notice */}
       <div className="rounded-lg bg-cs-bg p-4 space-y-3">
