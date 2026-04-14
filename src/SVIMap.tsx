@@ -8,6 +8,7 @@ import {
   type SVIFeatureCollection, type SVITheme, type FacilityMarker, type SVIProperties,
 } from "./svi-data";
 import { getScreeningLog } from "./screening-log";
+import PopulationHealthDashboard from "./charts/PopulationHealthDashboard";
 
 type DataSource =
   | { kind: "sample" }
@@ -728,6 +729,9 @@ export default function SVIMapView() {
 
       {/* Stats */}
       <StatsSummary data={data} />
+
+      {/* Population health analytics charts */}
+      <PopulationHealthDashboard data={data} dataSource={dataSource} />
 
       {/* Data source notice */}
       <div className="rounded-lg bg-cs-bg p-4 space-y-3">
