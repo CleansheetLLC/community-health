@@ -8,12 +8,19 @@ import {
   computeHitsComposite, getHitsCompositeZCodes, HITS_THRESHOLD,
   type AhcQuestion,
 } from "./ahc-hrsn";
+import ResourcePanel from "./ResourcePanel";
+import type { ReferralAction } from "./resource-referrals";
+import type { ReferralLogEntry } from "./screening-log";
 import SVIMapView from "./SVIMap";
 import {
   saveScreeningEntry, getScreeningLog, clearScreeningLog,
   exportScreeningLogCSV, downloadCSV, getCurrentTract, testGeocoding,
   type ScreeningLogEntry, type TractTestResult,
 } from "./screening-log";
+
+// 211.org resource referral features are hidden pending a support inquiry
+// to 211.org about API access terms. Set to true to re-enable.
+const ENABLE_211_RESOURCES = false;
 
 function t(en: string, es: string | undefined, lang: Lang): string {
   return lang === "es" && es ? es : en;
@@ -381,6 +388,17 @@ function PrapareScreening() {
   const [tagTract, setTagTract] = useState(false);
   const [savingTract, setSavingTract] = useState(false);
   const [tractError, setTractError] = useState<string | null>(null);
+  const [referralActions, setReferralActions] = useState<ReferralLogEntry[]>([]);
+
+  const handleReferralAction = useCallback((action: ReferralAction) => {
+    setReferralActions((prev) => [...prev, {
+      zCode: action.zCode,
+      categoryId: action.categoryId,
+      categoryLabel: action.categoryId, // will be enriched by ResourcePanel
+      action: action.action,
+      timestamp: action.timestamp,
+    }]);
+  }, []);
 
   const handleSaveResult = useCallback(async () => {
     // Collect all positive-screen flags across all domains, then match Z codes
@@ -402,6 +420,7 @@ function PrapareScreening() {
         flags: riskFlags[d.id] || [],
       })),
       suggestedZCodes: zCodes,
+      referrals: referralActions.length > 0 ? referralActions : undefined,
     };
 
     if (tagTract) {
@@ -433,7 +452,7 @@ function PrapareScreening() {
 
     saveScreeningEntry(entry);
     setSaved(true);
-  }, [riskFlags, riskLevel, domainsWithFlags, totalFlags, tagTract, lang]);
+  }, [riskFlags, riskLevel, domainsWithFlags, totalFlags, tagTract, lang, referralActions]);
 
   return (
     <div>
@@ -602,6 +621,20 @@ function PrapareScreening() {
                       })()}
                     </div>
                   </div>
+                )}
+                {/* Resource referrals for this domain's Z codes (hidden pending 211.org inquiry) */}
+                {ENABLE_211_RESOURCES && flags.length > 0 && (
+                  <ResourcePanel
+                    zCodes={(() => {
+                      const codes = getMatchingZCodesForPrapare(flags);
+                      return Z_CODE_MAPPINGS
+                        .flatMap((m) => m.codes)
+                        .filter((c) => codes.includes(c.code))
+                        .map((c) => c.code);
+                    })()}
+                    lang={lang}
+                    onReferralAction={handleReferralAction}
+                  />
                 )}
               </div>
             );
@@ -990,6 +1023,17 @@ function AhcHrsnScreening() {
   const totalQuestions = AHC_QUESTIONS.length;
   const [saved, setSaved] = useState(false);
   const [tagTract, setTagTract] = useState(false);
+  const [ahcReferralActions, setAhcReferralActions] = useState<ReferralLogEntry[]>([]);
+
+  const handleAhcReferralAction = useCallback((action: ReferralAction) => {
+    setAhcReferralActions((prev) => [...prev, {
+      zCode: action.zCode,
+      categoryId: action.categoryId,
+      categoryLabel: action.categoryId,
+      action: action.action,
+      timestamp: action.timestamp,
+    }]);
+  }, []);
   const [savingTract, setSavingTract] = useState(false);
   const [tractError, setTractError] = useState<string | null>(null);
 
@@ -1018,6 +1062,7 @@ function AhcHrsnScreening() {
         flags: riskFlags[d.id] || [],
       })),
       suggestedZCodes: [...zCodeSet],
+      referrals: ahcReferralActions.length > 0 ? ahcReferralActions : undefined,
     };
 
     if (tagTract) {
@@ -1214,16 +1259,25 @@ function AhcHrsnScreening() {
                   );
                   if (uniqueCodes.length === 0) return null;
                   return (
-                    <div className="border-t border-cs-border pt-3 mt-3">
-                      <p className="font-body text-xs text-cs-text/50 mb-1">{lang === "es" ? "Códigos Z del ICD-10 sugeridos:" : "Suggested ICD-10 Z codes:"}</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {uniqueCodes.map((c) => (
-                          <span key={c.code} className="font-mono text-xs bg-cs-badge text-cs-blue-dark px-2 py-0.5 rounded">
-                            {c.code} {c.description}
-                          </span>
-                        ))}
+                    <>
+                      <div className="border-t border-cs-border pt-3 mt-3">
+                        <p className="font-body text-xs text-cs-text/50 mb-1">{lang === "es" ? "Códigos Z del ICD-10 sugeridos:" : "Suggested ICD-10 Z codes:"}</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {uniqueCodes.map((c) => (
+                            <span key={c.code} className="font-mono text-xs bg-cs-badge text-cs-blue-dark px-2 py-0.5 rounded">
+                              {c.code} {c.description}
+                            </span>
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                      {ENABLE_211_RESOURCES && (
+                        <ResourcePanel
+                          zCodes={uniqueCodes.map((c) => c.code)}
+                          lang={lang}
+                          onReferralAction={handleAhcReferralAction}
+                        />
+                      )}
+                    </>
                   );
                 })()}
               </div>

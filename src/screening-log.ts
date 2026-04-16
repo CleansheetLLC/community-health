@@ -2,6 +2,14 @@
 // Stores de-identified screening results in localStorage.
 // No PII -- only date, instrument, domain scores, risk level, and Z codes.
 
+export interface ReferralLogEntry {
+  zCode: string;
+  categoryId: string;
+  categoryLabel: string;
+  action: "viewed" | "clicked_211" | "clicked_hotline" | "clicked_online" | "declined";
+  timestamp: string;
+}
+
 export interface ScreeningLogEntry {
   id: string;
   date: string;             // ISO date string
@@ -21,6 +29,9 @@ export interface ScreeningLogEntry {
   censusTract?: string;
   county?: string;
   state?: string;
+  // Referral actions captured as the worker interacts with resource links.
+  // Logged automatically when the worker clicks 211/hotline/online links.
+  referrals?: ReferralLogEntry[];
 }
 
 // ─── Census Tract Geocoding ──────────────────────────────────────────────────
@@ -388,11 +399,15 @@ export function exportScreeningLogCSV(): string {
     ...domainNames.map((d) => `${d} (flags)`),
     ...domainNames.map((d) => `${d} (details)`),
     "Suggested Z Codes",
+    "Referral Actions",
+    "Referral Categories",
   ];
 
   // Build rows
   const rows = log.map((entry) => {
     const domainMap = new Map(entry.domains.map((d) => [d.domain, d]));
+    const refActions = entry.referrals ?? [];
+    const refClicked = refActions.filter((r) => r.action.startsWith("clicked_"));
     return [
       entry.date.slice(0, 10), // date only
       entry.instrument,
@@ -408,6 +423,8 @@ export function exportScreeningLogCSV(): string {
         return flags.join("; ");
       }),
       entry.suggestedZCodes.join("; "),
+      String(refClicked.length),
+      [...new Set(refClicked.map((r) => r.categoryLabel))].join("; "),
     ];
   });
 
