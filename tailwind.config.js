@@ -4,8 +4,8 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        heading: ["Questrial", "sans-serif"],
-        body: ["Barlow", "sans-serif"],
+        heading: ["Inter", "sans-serif"],
+        body: ["Inter", "sans-serif"],
       },
       colors: {
         cs: {

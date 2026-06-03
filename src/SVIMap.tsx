@@ -276,7 +276,7 @@ export default function SVIMapView() {
         fillOpacity: 0.9,
       })
         .bindPopup(
-          `<div style="font-family:Barlow,sans-serif;font-size:12px;line-height:1.4">
+          `<div style="font-family:Inter,sans-serif;font-size:12px;line-height:1.4">
             <strong>${f.name}</strong><br>
             <span style="color:${color};font-weight:600">${f.type}</span><br>
             <span style="color:#666">${f.address || ""}</span>
